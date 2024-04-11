@@ -3,7 +3,7 @@ import { shallow } from 'zustand/shallow';
 
 import { Chip, CircularProgress, FormControl, Input, Option, Select, Slider, Switch } from '@mui/joy';
 import CropSquareIcon from '@mui/icons-material/CropSquare';
-import FormatPaintIcon from '@mui/icons-material/FormatPaint';
+import FormatPaintTwoToneIcon from '@mui/icons-material/FormatPaintTwoTone';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import StayPrimaryLandscapeIcon from '@mui/icons-material/StayPrimaryLandscape';
 import StayPrimaryPortraitIcon from '@mui/icons-material/StayPrimaryPortrait';
@@ -79,7 +79,7 @@ export function ProdiaSettings(props: { noSkipKey?: boolean }) {
   return <>
 
     {!backendHasProdia && !!props.noSkipKey && <FormInputKey
-      id='prodia-key' label='Prodia API Key'
+      autoCompleteId='prodia-key' label='Prodia API Key'
       rightLabel={backendHasProdia ? '✔️ already set in server' : 'required'}
       value={apiKey} onChange={setApiKey}
       required={!backendHasProdia} isError={!isValidKey}
@@ -92,7 +92,7 @@ export function ProdiaSettings(props: { noSkipKey?: boolean }) {
       <Select
         variant='outlined' placeholder={isValidKey ? 'Select a model' : 'Enter API Key'}
         value={modelId} onChange={handleModelChange}
-        startDecorator={<FormatPaintIcon sx={{ display: { xs: 'none', sm: 'inherit' } }} />}
+        startDecorator={<FormatPaintTwoToneIcon sx={{ display: { xs: 'none', sm: 'inherit' } }} />}
         endDecorator={isValidKey && loadingModels && <CircularProgress size='sm' />}
         indicator={<KeyboardArrowDownIcon />}
         slotProps={{

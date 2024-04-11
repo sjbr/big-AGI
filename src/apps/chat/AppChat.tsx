@@ -6,6 +6,7 @@ import { useTheme } from '@mui/joy';
 import { DiagramConfig, DiagramsModal } from '~/modules/aifn/digrams/DiagramsModal';
 import { FlattenerModal } from '~/modules/aifn/flatten/FlattenerModal';
 import { TradeConfig, TradeModal } from '~/modules/trade/TradeModal';
+import { downloadConversation, openAndLoadConversations } from '~/modules/trade/trade.client';
 import { getChatLLMId, useChatLLM } from '~/modules/llms/store-llms';
 import { imaginePromptFromText } from '~/modules/aifn/imagine/imaginePromptFromText';
 import { speakText } from '~/modules/elevenlabs/elevenlabs.client';
@@ -398,6 +399,32 @@ export function AppChat() {
     setTradeConfig({ dir: 'export', conversationId, exportAll });
   }, []);
 
+  const handleFileOpenConversation = React.useCallback(() => {
+    openAndLoadConversations(true)
+      .then((outcome) => {
+        // activate the last (most recent) imported conversation
+        if (outcome?.activateConversationId) {
+          showNextTitleChange.current = true;
+          handleOpenConversationInFocusedPane(outcome.activateConversationId);
+        }
+      })
+      .catch(() => {
+        addSnackbar({ key: 'chat-import-fail', message: 'Could not open the file.', type: 'issue' });
+      });
+  }, [handleOpenConversationInFocusedPane]);
+
+  const handleFileSaveConversation = React.useCallback((conversationId: DConversationId | null) => {
+    const conversation = getConversation(conversationId);
+    conversation && downloadConversation(conversation, 'json')
+      .then(() => {
+        addSnackbar({ key: 'chat-save-as-ok', message: 'File saved.', type: 'success' });
+      })
+      .catch((err: any) => {
+        if (err?.name !== 'AbortError')
+          addSnackbar({ key: 'chat-save-as-fail', message: `Could not save the file. ${err?.message || ''}`, type: 'issue' });
+      });
+  }, []);
+
   const handleConversationBranch = React.useCallback((srcConversationId: DConversationId, messageId: string | null): DConversationId | null => {
     // clone data
     const branchedConversationId = branchConversation(srcConversationId, messageId);
@@ -458,6 +485,8 @@ export function AppChat() {
     ['b', true, true, false, handleMessageBeamLastInFocusedPane],
     ['r', true, true, false, handleMessageRegenerateLastInFocusedPane],
     ['n', true, false, true, handleConversationNewInFocusedPane],
+    ['o', true, false, false, handleFileOpenConversation],
+    ['s', true, false, false, () => handleFileSaveConversation(focusedPaneConversationId)],
     ['b', true, false, true, () => isFocusedChatEmpty || (focusedPaneConversationId && handleConversationBranch(focusedPaneConversationId, null))],
     ['x', true, false, true, () => isFocusedChatEmpty || (focusedPaneConversationId && handleConversationClear(focusedPaneConversationId))],
     ['d', true, false, true, () => focusedPaneConversationId && handleDeleteConversations([focusedPaneConversationId], false)],
@@ -467,7 +496,7 @@ export function AppChat() {
     ['o', true, true, false, handleOpenChatLlmOptions],
     ['+', true, true, false, useUIPreferencesStore.getState().increaseContentScaling],
     ['-', true, true, false, useUIPreferencesStore.getState().decreaseContentScaling],
-  ], [focusedPaneConversationId, handleConversationBranch, handleConversationClear, handleConversationNewInFocusedPane, handleDeleteConversations, handleMessageBeamLastInFocusedPane, handleMessageRegenerateLastInFocusedPane, handleNavigateHistoryInFocusedPane, handleOpenChatLlmOptions, isFocusedChatEmpty]);
+  ], [focusedPaneConversationId, handleConversationBranch, handleConversationClear, handleConversationNewInFocusedPane, handleFileOpenConversation, handleFileSaveConversation, handleDeleteConversations, handleMessageBeamLastInFocusedPane, handleMessageRegenerateLastInFocusedPane, handleNavigateHistoryInFocusedPane, handleOpenChatLlmOptions, isFocusedChatEmpty]);
   useGlobalShortcuts(shortcuts);
 
 

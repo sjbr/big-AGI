@@ -9,7 +9,7 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import AutoModeIcon from '@mui/icons-material/AutoMode';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import FormatPaintIcon from '@mui/icons-material/FormatPaint';
+import FormatPaintTwoToneIcon from '@mui/icons-material/FormatPaintTwoTone';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import SendIcon from '@mui/icons-material/Send';
 import StopOutlinedIcon from '@mui/icons-material/StopOutlined';
@@ -518,7 +518,7 @@ export function Composer(props: {
       : isAppend ? <SendIcon sx={{ fontSize: 18 }} />
         : isReAct ? <PsychologyIcon />
           : isTextBeam ? <ChatBeamIcon /> /* <GavelIcon /> */
-            : isDraw ? <FormatPaintIcon />
+            : isDraw ? <FormatPaintTwoToneIcon />
               : <TelegramIcon />;
 
   let textPlaceholder: string =
@@ -678,20 +678,32 @@ export function Composer(props: {
               {/* overlay: Mic */}
               {micIsRunning && (
                 <Card
-                  color='primary' variant='soft' invertedColors
+                  color='primary' variant='soft'
                   sx={{
-                    display: 'flex',
                     position: 'absolute', bottom: 0, left: 0, right: 0, top: 0,
                     // alignItems: 'center', justifyContent: 'center',
                     border: '1px solid',
                     borderColor: 'primary.solidBg',
                     borderRadius: 'sm',
                     zIndex: zIndexComposerOverlayMic,
-                    px: 1.5, py: 1,
+                    pl: 1.5,
+                    pr: { xs: 1.5, md: 5 },
+                    py: 0.625,
+                    overflow: 'auto',
                   }}>
-                  <Typography>
+                  <Typography sx={{
+                    color: 'primary.softColor',
+                    lineHeight: lineHeightTextareaMd,
+                    '& .interim': {
+                      textDecoration: 'underline',
+                      textDecorationThickness: '0.25em',
+                      textDecorationColor: 'rgba(var(--joy-palette-primary-mainChannel) / 0.1)',
+                      textDecorationSkipInk: 'none',
+                      textUnderlineOffset: '0.25em',
+                    },
+                  }}>
                     {speechInterimResult.transcript}{' '}
-                    <span style={{ opacity: 0.8 }}>{speechInterimResult.interimTranscript}</span>
+                    <span className={speechInterimResult.interimTranscript !== 'Listening...' ? 'interim' : undefined}>{speechInterimResult.interimTranscript}</span>
                   </Typography>
                 </Card>
               )}

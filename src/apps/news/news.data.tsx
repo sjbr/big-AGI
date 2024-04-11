@@ -1,14 +1,12 @@
 import * as React from 'react';
 import { StaticImageData } from 'next/image';
 
-import { SxProps } from '@mui/joy/styles/types';
 import { Box, Chip, SvgIconProps, Typography } from '@mui/joy';
-import AutoStoriesOutlinedIcon from '@mui/icons-material/AutoStoriesOutlined';
 import GoogleIcon from '@mui/icons-material/Google';
-import LaunchIcon from '@mui/icons-material/Launch';
 
 import { AnthropicIcon } from '~/common/components/icons/vendors/AnthropicIcon';
 import { ChatBeamIcon } from '~/common/components/icons/ChatBeamIcon';
+import { ExternalLink } from '~/common/components/ExternalLink';
 import { GroqIcon } from '~/common/components/icons/vendors/GroqIcon';
 import { LocalAIIcon } from '~/common/components/icons/vendors/LocalAIIcon';
 import { MistralIcon } from '~/common/components/icons/vendors/MistralIcon';
@@ -29,7 +27,7 @@ import coverV114 from '../../../public/images/covers/release-cover-v1.14.0.png';
 import coverV113 from '../../../public/images/covers/release-cover-v1.13.0.png';
 // An image of a capybara sculpted entirely from black cotton candy, set against a minimalist backdrop with splashes of bright, contrasting sparkles. The capybara is calling on a 3D origami old-school pink telephone and the camera is zooming on the telephone. Close up photography, bokeh, white background.
 import coverV112 from '../../../public/images/covers/release-cover-v1.12.0.png';
-import { beamBlogUrl, beamReleaseDate } from './beam.data';
+import { beamBlogUrl } from './beam.data';
 
 
 interface NewsItem {
@@ -59,18 +57,19 @@ export const NewsItems: NewsItem[] = [
     ]
   }*/
   {
-    versionCode: '1.15.0',
+    versionCode: '1.15.1',
     versionName: 'Beam',
-    versionDate: new Date(beamReleaseDate),
+    versionDate: new Date('2024-04-10T08:00:00Z'),
     versionCoverImage: coverV115,
     items: [
       { text: <><B href={beamBlogUrl} wow>Beam</B>: Find better answers with multi-model AI reasoning</>, issue: 443, icon: ChatBeamIcon },
-      { text: <><B>Explore diverse perspectives</B> and <B>synthesize optimal responses</B></>, noBullet: true },
+      // { text: <><B>Explore diverse perspectives</B> and <B>synthesize optimal responses</B></>, noBullet: true },
       { text: <><B issue={436}>Auto-configure</B> models for managed deployments</>, issue: 436 },
       { text: <>Message <B issue={476}>starring ⭐</B>, filtering and attachment</>, issue: 476 },
       { text: <>Default persona improvements</> },
       { text: <>Fixes to Gemini models and SVGs, improvements to UI and icons, and more</> },
       { text: <>Developers: imperative LLM models discovery</>, dev: true },
+      { text: <>1.15.1: Support for <B>Gemini Pro 1.5</B> and <B>OpenAI 2024-04-09</B> models</> },
     ],
   },
   {
@@ -277,15 +276,6 @@ export const NewsItems: NewsItem[] = [
 ];
 
 
-const wowStyle: SxProps = {
-  textDecoration: 'underline',
-  textDecorationThickness: '0.4em',
-  textDecorationColor: 'rgba(var(--joy-palette-primary-lightChannel) / 1)',
-  // textDecorationColor: 'rgba(0 255 0 / 0.5)',
-  textDecorationSkipInk: 'none',
-  // textUnderlineOffset: '-0.5em',
-};
-
 function B(props: {
   // one-of
   href?: string,
@@ -299,7 +289,6 @@ function B(props: {
     props.issue ? `${Brand.URIs.OpenRepo}/issues/${props.issue}`
       : props.code ? `${Brand.URIs.OpenRepo}/blob/main/${props.code}`
         : props.href;
-  const isExtIcon = !props.issue;
   const boldText = (
     <Typography component='span' color={!!href ? 'primary' : 'neutral'} sx={{ fontWeight: 'lg' }}>
       {props.children}
@@ -308,8 +297,8 @@ function B(props: {
   if (!href)
     return boldText;
   return (
-    <Link href={href + clientUtmSource()} target='_blank' sx={props.wow ? wowStyle : undefined}>
-      {boldText} {isExtIcon ? <LaunchIcon sx={{ mx: 0.5, fontSize: 16 }} /> : <AutoStoriesOutlinedIcon sx={{ mx: 0.5, fontSize: 16 }} />}
-    </Link>
+    <ExternalLink href={href + clientUtmSource()} highlight={props.wow} icon={props.issue ? 'issue' : undefined}>
+      {boldText}
+    </ExternalLink>
   );
 }
