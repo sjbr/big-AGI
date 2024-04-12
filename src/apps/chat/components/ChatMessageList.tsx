@@ -277,8 +277,8 @@ export function ChatMessageList(props: {
               onMessageToggleUserFlag={handleMessageToggleUserFlag}
               onMessageTruncate={handleMessageTruncate}
               onTextDiagram={handleTextDiagram}
-              onTextImagine={handleTextImagine}
-              onTextSpeak={handleTextSpeak}
+              onTextImagine={capabilityHasT2I ? handleTextImagine : undefined}
+              onTextSpeak={isSpeakable ? handleTextSpeak : undefined}
             />
 
           );
