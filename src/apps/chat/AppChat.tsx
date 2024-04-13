@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
+import type { SxProps } from '@mui/joy/styles/types';
 import { useTheme } from '@mui/joy';
 
 import { DiagramConfig, DiagramsModal } from '~/modules/aifn/digrams/DiagramsModal';
@@ -66,6 +67,19 @@ export type ChatModeId =
 export interface AppChatIntent {
   initialConversationId: string | null;
 }
+
+
+const composerOpenSx: SxProps = {
+  zIndex: 21, // just to allocate a surface, and potentially have a shadow
+  backgroundColor: themeBgAppChatComposer,
+  borderTop: `1px solid`,
+  borderTopColor: 'divider',
+  p: { xs: 1, md: 2 },
+};
+
+const composerClosedSx: SxProps = {
+  display: 'none',
+};
 
 
 export function AppChat() {
@@ -312,13 +326,13 @@ export function AppChat() {
     const userText = multiPartMessage[0].text;
 
     // multicast: send the message to all the panes
-    const uniqueIds = new Set([conversationId]);
+    const uniqueConversationIds = new Set([conversationId]);
     if (willMulticast)
-      chatPanes.forEach(pane => pane.conversationId && uniqueIds.add(pane.conversationId));
+      chatPanes.forEach(pane => pane.conversationId && uniqueConversationIds.add(pane.conversationId));
 
     // we loop to handle both the normal and multicast modes
     let enqueued = false;
-    for (const _cId of uniqueIds) {
+    for (const _cId of uniqueConversationIds) {
       const _conversation = getConversation(_cId);
       if (_conversation) {
         // start execution fire/forget
@@ -675,15 +689,7 @@ export function AppChat() {
       onAction={handleComposerAction}
       onTextImagine={handleTextImagine}
       setIsMulticast={setIsComposerMulticast}
-      sx={beamOpenStoreInFocusedPane ? {
-        display: 'none',
-      } : {
-        zIndex: 21, // just to allocate a surface, and potentially have a shadow
-        backgroundColor: themeBgAppChatComposer,
-        borderTop: `1px solid`,
-        borderTopColor: 'divider',
-        p: { xs: 1, md: 2 },
-      }}
+      sx={beamOpenStoreInFocusedPane ? composerClosedSx : composerOpenSx}
     />
 
     {/* Diagrams */}
