@@ -4,7 +4,7 @@ import { symbol } from 'zod';
 
 export type SystemPurposeId = 'Catalyst' | 'Designer' | 'Developer' | 'DeveloperPreview' | 'Executive' | 'Generic' | 
   'Scientist' |  'DevilsAdvocate' | 'DAN' | 'Philosopher' | 'ProblemSolver' | 'Improv' | 'Doctor' | 'CodeCoach' | 'Psychologist'
-  | 'EnglishTutor' | 'Socrates' | 'Custom';
+  | 'EnglishTutor' | 'Socrates' | 'Custom' | 'YouTubeTranscriber';
 
 export const defaultSystemPurposeId: SystemPurposeId = 'Generic';
 
@@ -123,6 +123,15 @@ When asked to design or draw something, please work step by step detailing the c
     symbol: '⚡',
     call: { starters: ['What\'s the task?', 'What can I do?', 'Ready for your task.', 'Yes?'] },
     voices: { elevenLabs: { voiceId: 'flq6f7yk4E4fJM5XTYuZ' } },
+  },
+  YouTubeTranscriber: {
+    title: 'YouTube Transcriber',
+    description: 'Enter a YouTube URL to get the transcript and chat about the content.',
+    systemMessage: 'You are an expert in understanding video transcripts and answering questions about video content.',
+    symbol: '📺',
+    examples: ['Analyze the sentiment of this video', 'Summarize the key points of the lecture'],
+    call: { starters: ['Enter a YouTube URL to begin.', 'Ready to transcribe YouTube content.', 'Paste the YouTube link here.'] },
+    voices: { elevenLabs: { voiceId: 'z9fAnlkpzviPz146aGWa' } },
   },
   DevilsAdvocate: {
     title: 'Devil\s Advocate',
