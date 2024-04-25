@@ -165,7 +165,9 @@ function RenderCodeImpl(props: RenderCodeImplProps) {
         sx={{
           whiteSpace: 'pre', // was 'break-spaces' before we implemented per-block scrolling
           mx: 0, p: 1.5, // this block gets a thicker border
-          display: 'block',
+          display: 'flex',
+          flexDirection: 'column',
+          // justifyContent: (renderMermaid || renderPlantUML) ? 'center' : undefined,
           overflowX: 'auto',
           minWidth: 160,
           '&:hover > .overlay-buttons': { opacity: 1 },
@@ -174,8 +176,8 @@ function RenderCodeImpl(props: RenderCodeImplProps) {
 
         {/* Markdown Title (File/Type) */}
         {blockTitle != inferredCodeLanguage && (blockTitle.includes('.') || blockTitle.includes('://')) && (
-          <Sheet sx={{ boxShadow: 'sm', borderRadius: 'sm', mb: 1 }}>
-            <Typography level='title-sm' sx={{ px: 1, py: 0.5 }}>
+          <Sheet sx={{ backgroundColor: 'background.surface', boxShadow: 'xs', borderRadius: 'xs', m: -0.5, mb: 1.5 }}>
+            <Typography level='body-sm' sx={{ px: 1, py: 0.5, color: 'text.primary' }}>
               {blockTitle}
               {/*{inferredCodeLanguage}*/}
             </Typography>
@@ -198,7 +200,7 @@ function RenderCodeImpl(props: RenderCodeImplProps) {
                    }}
                    sx={{
                      ...(renderSVG ? { lineHeight: 0 } : {}),
-                     ...(renderPlantUML ? { textAlign: 'center' } : {}),
+                     ...(renderPlantUML ? { textAlign: 'center', mx: 'auto' } : {}),
                    }}
             />}
 

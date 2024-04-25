@@ -53,7 +53,9 @@ export function parseMessageBlocks(text: string, disableParsing: boolean, forceT
     return legacyImageBlocks;
 
   const regexPatterns = {
-    codeBlock: /`{3,}([\w\x20\\.+-_]+)?\n([\s\S]*?)(`{3,}\n?|$)/g,
+    // was: \w\x20\\.+-_ for tge filename, but was missing too much
+    // REVERTED THIS: was: (`{3,}\n?|$), but was matching backticks within blocks. so now it must end with a newline or stop
+    codeBlock: /`{3,}([\S\x20]+)?\n([\s\S]*?)(`{3,}\n?|$)/g,
     htmlCodeBlock: /<!DOCTYPE html>([\s\S]*?)<\/html>/g,
     svgBlock: /<svg (xmlns|width|viewBox)=([\s\S]*?)<\/svg>/g,
   };

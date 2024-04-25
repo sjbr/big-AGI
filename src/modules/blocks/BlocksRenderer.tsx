@@ -4,8 +4,8 @@ import type { Diff as TextDiff } from '@sanity/diff-match-patch';
 
 import type { SxProps } from '@mui/joy/styles/types';
 import { Box, Button, Tooltip, Typography } from '@mui/joy';
-import UnfoldLessRoundedIcon from '@mui/icons-material/UnfoldLessRounded';
-import UnfoldMoreRoundedIcon from '@mui/icons-material/UnfoldMoreRounded';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
 import type { DMessage } from '~/common/state/store-chats';
 import { ContentScaling, lineHeightChatTextMd, themeScalingMap } from '~/common/app.theme';
@@ -110,14 +110,15 @@ export const BlocksRenderer = React.forwardRef<HTMLDivElement, BlocksRendererPro
 
   const scaledCodeSx: SxProps = React.useMemo(() => (
     {
+      my: props.specialDiagramMode ? 0 : themeScalingMap[props.contentScaling]?.blockCodeMarginY ?? 0,
       backgroundColor: props.specialDiagramMode ? 'background.surface' : fromAssistant ? 'neutral.plainHoverBg' : 'primary.plainActiveBg',
-      boxShadow: props.specialDiagramMode ? 'md' : 'xs',
+      boxShadow: props.specialDiagramMode ? undefined : 'inset 2px 0px 5px -4px var(--joy-palette-background-backdrop)', // was 'xs'
+      borderRadius: 'sm',
       fontFamily: 'code',
       fontSize: themeScalingMap[props.contentScaling]?.blockCodeFontSize ?? '0.875rem',
       fontWeight: 'md', // JetBrains Mono has a lighter weight, so we need that extra bump
       fontVariantLigatures: 'none',
       lineHeight: themeScalingMap[props.contentScaling]?.blockLineHeight ?? 1.75,
-      borderRadius: 'var(--joy-radius-sm)',
     }
   ), [fromAssistant, props.contentScaling, props.specialDiagramMode]);
 
@@ -219,9 +220,9 @@ export const BlocksRenderer = React.forwardRef<HTMLDivElement, BlocksRendererPro
       )}
 
       {isTextCollapsed ? (
-        <Box sx={{ textAlign: 'right' }}><Button variant='soft' size='sm' onClick={handleTextUncollapse} startDecorator={<UnfoldMoreRoundedIcon />} sx={{ minWidth: 100, mt: 0.5 }}>Expand</Button></Box>
+        <Box sx={{ textAlign: 'right' }}><Button variant='soft' size='sm' onClick={handleTextUncollapse} startDecorator={<ExpandMoreIcon />} sx={{ minWidth: 120 }}>Expand</Button></Box>
       ) : forceUserExpanded && (
-        <Box sx={{ textAlign: 'right' }}><Button variant='soft' size='sm' onClick={handleTextCollapse} startDecorator={<UnfoldLessRoundedIcon />} sx={{ minWidth: 100, mt: 0.5 }}>Collapse</Button></Box>
+        <Box sx={{ textAlign: 'right' }}><Button variant='soft' size='sm' onClick={handleTextCollapse} startDecorator={<ExpandLessIcon />} sx={{ minWidth: 120 }}>Collapse</Button></Box>
       )}
 
       {/* import VisibilityIcon from '@mui/icons-material/Visibility'; */}
