@@ -722,15 +722,6 @@ export function ChatMessage(props: {
               <span style={{ opacity: 0.5 }}>after this</span>
             </MenuItem>
           )}
-          {/* Diff Viewer */}
-          {!!props.diffPreviousText && <ListDivider />}
-          {!!props.diffPreviousText && (
-            <MenuItem onClick={handleOpsToggleShowDiff}>
-              <ListItemDecorator><DifferenceIcon /></ListItemDecorator>
-              Show difference
-              <Switch checked={showDiff} onChange={handleOpsToggleShowDiff} sx={{ ml: 'auto' }} />
-            </MenuItem>
-          )}
           {/* Diagram / Draw / Speak */}
           {!!props.onTextDiagram && <ListDivider />}
           {!!props.onTextDiagram && (
@@ -749,6 +740,15 @@ export function ChatMessage(props: {
             <MenuItem onClick={handleOpsSpeak} disabled={!couldSpeak || props.isSpeaking}>
               <ListItemDecorator>{props.isSpeaking ? <CircularProgress size='sm' /> : <RecordVoiceOverOutlinedIcon />}</ListItemDecorator>
               Speak
+            </MenuItem>
+          )}
+          {/* Diff Viewer */}
+          {!!props.diffPreviousText && <ListDivider />}
+          {!!props.diffPreviousText && (
+            <MenuItem onClick={handleOpsToggleShowDiff}>
+              <ListItemDecorator><DifferenceIcon /></ListItemDecorator>
+              Show difference
+              <Switch checked={showDiff} onChange={handleOpsToggleShowDiff} sx={{ ml: 'auto' }} />
             </MenuItem>
           )}
           {/* Beam/Restart */}
@@ -800,7 +800,8 @@ export function ChatMessage(props: {
                 alignItems: 'center',
                 '& > button': {
                   '--Icon-fontSize': '1rem',
-                  minWidth: '2.5rem',
+                  minHeight: '2.5rem',
+                  minWidth: '2.75rem',
                 },
               }}
             >
@@ -820,10 +821,10 @@ export function ChatMessage(props: {
                   <ContentCopyIcon />
                 </IconButton>
               </Tooltip>
-              {((!!props.onTextDiagram && couldDiagram) || !!props.onTextSpeak) && <MoreVertIcon sx={{ color: 'neutral.outlinedBorder', fontSize: 'md' }} />}
-              {!!props.onTextDiagram && couldDiagram && <Tooltip disableInteractive arrow placement='top' title='Auto-Diagram ...'>
-                <IconButton onClick={handleOpsDiagram} disabled={!couldDiagram}>
-                  <AccountTreeOutlinedIcon />
+              {(!!props.onTextDiagram || !!props.onTextSpeak) && <MoreVertIcon sx={{ color: 'neutral.outlinedBorder', fontSize: 'md' }} />}
+              {!!props.onTextDiagram && <Tooltip disableInteractive arrow placement='top' title={couldDiagram ? 'Auto-Diagram...' : 'Too short to Auto-Diagram'}>
+                <IconButton onClick={couldDiagram ? handleOpsDiagram : undefined}>
+                  <AccountTreeOutlinedIcon sx={{ color: couldDiagram ? 'primary' : 'neutral.plainDisabledColor' }} />
                 </IconButton>
               </Tooltip>}
               {/*{!!props.onTextImagine && <Tooltip disableInteractive arrow placement='top' title='Auto-Draw'>*/}
