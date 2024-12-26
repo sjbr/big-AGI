@@ -24,6 +24,14 @@ export type SystemPurposeData = {
 export type SystemPurposeExample = string | { prompt: string, action?: 'require-data-attachment' };
 
 export const SystemPurposes: { [key in SystemPurposeId]: SystemPurposeData } = {
+  Custom: {
+    title: 'Custom',
+    description: 'Define the persona, or task:',
+    systemMessage: 'You are ChatGPT, a large language model trained by OpenAI, based on the GPT-4 architecture.\nCurrent date: {{Today}}',
+    symbol: '⚡',
+    call: { starters: ['What\'s the task?', 'What can I do?', 'Ready for your task.', 'Yes?'] },
+    voices: { elevenLabs: { voiceId: 'flq6f7yk4E4fJM5XTYuZ' } },
+  },
   Generic: {
     title: 'Default',
     description: 'Smart Assistant',
