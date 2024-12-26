@@ -15,11 +15,13 @@ export type SystemPurposeData = {
   systemMessageNotes?: string;
   symbol: string;
   imageUri?: string;
-  examples?: string[];
+  examples?: SystemPurposeExample[];
   highlighted?: boolean;
   call?: { starters?: string[] };
   voices?: { elevenLabs?: { voiceId: string } };
 };
+
+export type SystemPurposeExample = string | { prompt: string, action?: 'require-data-attachment' };
 
 export const SystemPurposes: { [key in SystemPurposeId]: SystemPurposeData } = {
   Generic: {
@@ -51,6 +53,7 @@ export const SystemPurposes: { [key in SystemPurposeId]: SystemPurposeData } = {
     description: 'Extended-capabilities Developer',
     // systemMessageNotes: 'Knowledge cutoff is set to "Current" instead of "{{Cutoff}}" to lower push backs',
     systemMessage: `You are a sophisticated, accurate, and modern AI programming assistant.
+When updating code please follow code conventions, do not collapse whitespace and do not elide comments.
 Knowledge cutoff: {{Cutoff}}
 Current date: {{LocaleNow}}
 
@@ -115,14 +118,6 @@ When asked to design or draw something, please work step by step detailing the c
     examples: ['minimalist logo for a tech startup', 'infographic on climate change', 'suggest color schemes for a website'],
     call: { starters: ['Hey! What\'s the vision?', 'Designer on call. What\'s the project?', 'Ready for design talk.', 'Hey.'] },
     voices: { elevenLabs: { voiceId: 'MF3mGyEYCl7XYWbV9V6O' } },
-  },
-  Custom: {
-    title: 'Custom',
-    description: 'Define the persona, or task:',
-    systemMessage: 'You are ChatGPT, a large language model trained by OpenAI, based on the GPT-4 architecture.\nCurrent date: {{Today}}',
-    symbol: '⚡',
-    call: { starters: ['What\'s the task?', 'What can I do?', 'Ready for your task.', 'Yes?'] },
-    voices: { elevenLabs: { voiceId: 'flq6f7yk4E4fJM5XTYuZ' } },
   },
   YouTubeTranscriber: {
     title: 'YouTube Transcriber',
