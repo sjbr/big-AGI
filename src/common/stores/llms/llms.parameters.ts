@@ -66,6 +66,13 @@ export const DModelParameterRegistry = {
     incompatibleWith: ['temperature'] as const,
   } as const,
 
+  llmVndGeminiShowThoughts: {
+    label: 'Show Thoughts',
+    type: 'boolean' as const,
+    description: 'Show Gemini\'s reasoning process',
+    initialValue: true,
+  } as const,
+
   llmVndOaiReasoningEffort: {
     label: 'Reasoning Effort',
     type: 'enum' as const,
@@ -89,7 +96,7 @@ export interface DModelParameterSpec<T extends DModelParameterId> {
   paramId: T;
   required?: boolean;
   hidden?: boolean;
-  upstreamDefault?: DModelParameterValue<T>;
+  // upstreamDefault?: DModelParameterValue<T>;
 }
 
 export type DModelParameterValues = {
@@ -115,6 +122,27 @@ type DModelParameterValue<T extends DModelParameterId> =
 
 
 /// Utility Functions
+
+export function applyModelParameterInitialValues(parameterIds: DModelParameterId[], parameterValues: DModelParameterValues, overwrite: boolean): void {
+  for (const paramId of parameterIds) {
+
+    // skip if the value is already present
+    if (!overwrite && paramId in parameterValues)
+      continue;
+
+    // find the parameter definition
+    const paramDef = DModelParameterRegistry[paramId];
+    if (!paramDef) {
+      console.warn(`applyModelParameterInitialValues: unknown parameter id '${paramId}'`);
+      continue;
+    }
+
+    // apply the initial value
+    if ('initialValue' in paramDef && paramDef.initialValue !== undefined)
+      parameterValues[paramId] = paramDef.initialValue as DModelParameterValue<typeof paramId>;
+  }
+}
+
 
 const _requiredParamId: DModelParameterId[] = ['llmRef', 'llmResponseTokens', 'llmTemperature'] as const;
 
