@@ -4,11 +4,11 @@ import { Badge, Box, Button, IconButton, ListItemDecorator, MenuItem, Option, Se
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
-import type { DModelsService, DModelsServiceId } from '~/common/stores/llms/modelsservice.types';
+import type { DModelsService, DModelsServiceId } from '~/common/stores/llms/llms.service.types';
 import { CloseablePopup } from '~/common/components/CloseablePopup';
 import { ConfirmationModal } from '~/common/components/modals/ConfirmationModal';
 import { TooltipOutlined } from '~/common/components/TooltipOutlined';
-import { llmsStoreActions, llmsStoreState } from '~/common/stores/llms/store-llms';
+import { llmsStoreActions } from '~/common/stores/llms/store-llms';
 import { themeZIndexOverMobileDrawer } from '~/common/app.theme';
 import { useIsMobile } from '~/common/components/useMatchMedia';
 import { useOverlayComponents } from '~/common/layout/overlays/useOverlayComponents';
@@ -63,7 +63,7 @@ export function ModelsServiceSelector(props: {
 
   const handleAddServiceForVendor = React.useCallback((vendor: IModelVendor) => {
     closeVendorsMenu();
-    const modelsService = llmsStoreState().createModelsService(vendor);
+    const modelsService = llmsStoreActions().createModelsService(vendor);
     setSelectedServiceId(modelsService.id);
   }, [setSelectedServiceId]);
 
