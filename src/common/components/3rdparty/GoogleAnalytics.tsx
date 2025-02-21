@@ -66,8 +66,7 @@ function NextGoogleAnalytics(props: {
           gtag('config', '${gaId}', {
             ${debugMode ? ' \'debug_mode\': true,' : ''}
             'user_properties': {
-              'app_tenant': '${Release.TenantId || 'unknown'}',
-              'app_pl': '${Release.App.pl || 'unknown'}',
+              'app_tenant': '${Release.TenantSlug || 'unknown'}',
               'app_build_hash': '${process.env.NEXT_PUBLIC_BUILD_HASH || 'unknown'}',
               'app_pkg_version': '${process.env.NEXT_PUBLIC_BUILD_PKGVER || 'unknown'}',
               'app_deployment_type': '${process.env.NEXT_PUBLIC_DEPLOYMENT_TYPE || 'unknown'}'
