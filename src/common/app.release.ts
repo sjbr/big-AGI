@@ -10,11 +10,10 @@
  * We centralize here the version information of the app, to have a uniform configuration surface.
  */
 export const Release = {
-  // CHANGE ME - this is the tenant ID, 'open' reserved for GitHub
-  TenantId: 'open',
+  // CHANGE ME - this is the tenant ID, 'dev' reserved for development only, 'open' reserved for GitHub
+  TenantSlug: 'open',
 
   App: {
-    pl: 'v2-dev',
     versionCode: '2.0.0-rc1',       // 1.92.0 sequentially...
     versionName: 'Big-AGI V2 RC1',
   },
@@ -28,7 +27,7 @@ export const Release = {
 
   // this is here to trigger revalidation of data, e.g. models refresh
   Monotonics: {
-    Aix: 11,
+    Aix: 12,
     NewsVersion: 191,
   },
 
