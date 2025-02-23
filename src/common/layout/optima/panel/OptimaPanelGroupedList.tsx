@@ -4,6 +4,10 @@ import type { SxProps } from '@mui/joy/styles/types';
 import { Box, Checkbox, MenuList } from '@mui/joy';
 
 import { ExpanderControlledBox } from '~/common/components/ExpanderControlledBox';
+import { themeScalingMap } from '~/common/app.theme';
+import { useUIContentScaling } from '~/common/state/store-ui';
+
+import { OPTIMA_PANEL_GROUPS_SPACING } from '../optima.config';
 
 
 const gutterSx: SxProps = {
@@ -32,12 +36,12 @@ const headerSx: SxProps = {
   borderTop: '1px solid',
   borderColor: 'rgba(var(--joy-palette-neutral-mainChannel) / 0.1)',
 
-  // mimix ListItem
+  // mimics ListItem
   px: 'var(--ListItem-paddingX, 0.75rem)',
   py: 'var(--ListItem-paddingY, 0.25rem)',
   minBlockSize: 'var(--ListItem-minHeight, 2.25rem)',
 
-  // layour
+  // layout
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
@@ -73,13 +77,15 @@ const groupListSx: SxProps = {
   borderRadius: 0,
   background: 'transparent',
   flexGrow: 0,
+  mb: OPTIMA_PANEL_GROUPS_SPACING,
+  // fontSize: '0.9375rem', // 15px (14 too small, 16 too big?)
   // py: 0,
   // py: 'var(--ListDivider-gap)',
 };
 
 
 export function OptimaPanelGroupedList(props: {
-  title: string;
+  title?: string;
   endDecorator?: React.ReactNode;
   children?: React.ReactNode;
   persistentCollapsibleId?: string;
@@ -89,6 +95,9 @@ export function OptimaPanelGroupedList(props: {
   // state
   // TODO: persist by id
   const [_expanded, setExpanded] = React.useState(props.startExpanded === true);
+
+  // external state
+  const contentScaling = useUIContentScaling();
 
   // derived state
   const isCollapsible = !!props.persistentCollapsibleId;
@@ -118,7 +127,7 @@ export function OptimaPanelGroupedList(props: {
 
       {/* Collapsible Items  */}
       <ExpanderControlledBox expanded={isExpanded}>
-        <MenuList variant='plain' sx={groupListSx}>
+        <MenuList size={themeScalingMap[contentScaling]?.optimaPanelGroupSize} sx={groupListSx}>
           {props.children}
         </MenuList>
       </ExpanderControlledBox>
