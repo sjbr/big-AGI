@@ -22,7 +22,7 @@ const DEFAULT_API_VERSION_HEADERS = {
   // - prompt-caching-2024-07-31: to use the prompt caching feature; adds to any API invocation:
   //   - message_start.message.usage.cache_creation_input_tokens: number
   //   - message_start.message.usage.cache_read_input_tokens: number
-  'anthropic-beta': 'computer-use-2024-10-22,prompt-caching-2024-07-31,max-tokens-3-5-sonnet-2024-07-15',
+  'anthropic-beta': 'computer-use-2024-10-22,prompt-caching-2024-07-31,max-tokens-3-5-sonnet-2024-07-15,output-128k-2025-02-19',
 };
 const DEFAULT_ANTHROPIC_HOST = 'api.anthropic.com';
 const DEFAULT_HELICONE_ANTHROPIC_HOST = 'anthropic.hconeai.com';
@@ -75,6 +75,10 @@ export function anthropicAccess(access: AnthropicAccessSchema, apiPath: string):
   };
 }
 
+function roundTime(date: string) {
+  return Math.round(new Date(date).getTime() / 1000);
+}
+
 
 // Input Schemas
 
@@ -110,6 +114,8 @@ export const llmAnthropicRouter = createTRPCRouter({
 
         // use an hardcoded model definition if available
         const hardcodedModel = hardcodedAnthropicModels.find(m => m.id === model.id);
+        if (hardcodedModel && !hardcodedModel.created && model.created_at)
+          hardcodedModel.created = roundTime(model.created_at);
         if (hardcodedModel)
           return hardcodedModel;
 
