@@ -395,6 +395,17 @@ export namespace AixWire_API {
     vndGeminiShowThoughts: z.boolean().optional(),
     vndOaiReasoningEffort: z.enum(['low', 'medium', 'high']).optional(),
     vndOaiRestoreMarkdown: z.boolean().optional(),
+    vndOaiWebSearchContext: z.enum(['low', 'medium', 'high']).optional(),
+    /**
+     * [OpenAI, 2025-03-11] This is the generic version of the `web_search_options.user_location` field
+     * This AIX field mimics on purpose: https://platform.openai.com/docs/api-reference/chat/create
+     */
+    userGeolocation: z.object({
+      city: z.string().optional(),      // free text input for the city of the user, e.g. San Francisco.
+      country: z.string().optional(),   // two-letter ISO country code of the user, e.g. US
+      region: z.string().optional(),    // free text input for the reg. of the user the user, e.g. California
+      timezone: z.string().optional(),  // IANA timezone of the user, e.g. America/Los_Angeles
+    }).optional(),
   });
 
   /// Context
@@ -571,6 +582,8 @@ export namespace AixWire_Particles {
     | { p: 'fci', id: string, name: string, i_args?: string /* never undefined */ }
     | { p: '_fci', _args: string }
     | { p: 'cei', id: string, language: string, code: string, author: 'gemini_auto_inline' }
-    | { p: 'cer', id: string, error: DMessageToolResponsePart['error'], result: string, executor: 'gemini_auto_inline', environment: DMessageToolResponsePart['environment'] };
+    | { p: 'cer', id: string, error: DMessageToolResponsePart['error'], result: string, executor: 'gemini_auto_inline', environment: DMessageToolResponsePart['environment'] }
+    | { p: 'ii', mimeType: string, i_b64: string, label?: string, generator?: string, prompt?: string } // inline image, complete
+    | { p: 'urlc', title: string, url: string, num?: number, from?: number, to?: number, text?: string }; // url citation
 
 }
