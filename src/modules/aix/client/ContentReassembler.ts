@@ -11,7 +11,7 @@ import { presentErrorToHumans } from '~/common/util/errorUtils';
 import type { AixWire_Particles } from '../server/api/aix.wiretypes';
 
 import type { AixClientDebugger, AixFrameId } from './debugger/memstore-aix-client-debugger';
-import { aixClientDebugger_completeFrame, aixClientDebugger_init, aixClientDebugger_recordParticleReceived, aixClientDebugger_setRequest } from './debugger/reassembler-debug';
+import { aixClientDebugger_completeFrame, aixClientDebugger_init, aixClientDebugger_recordParticleReceived, aixClientDebugger_setProfilerMeasurements, aixClientDebugger_setRequest } from './debugger/reassembler-debug';
 
 import { AixChatGenerateContent_LL, DEBUG_PARTICLES } from './aix.client';
 
@@ -21,6 +21,7 @@ const GENERATED_IMAGES_CONVERT_TO_COMPRESSED = true; // converts PNG to WebP or 
 const GENERATED_IMAGES_COMPRESSION_QUALITY = 0.98;
 const ELLIPSIZE_DEV_ISSUE_MESSAGES = 4096;
 const MERGE_ISSUES_INTO_TEXT_PART_IF_OPEN = true;
+const DEBUG_LOG_PROFILER_ON_CLIENT = false; // print Profiling particles when they come in, otherwise ignore them
 
 
 /**
@@ -197,6 +198,9 @@ export class ContentReassembler {
       // PartParticleOp
       case 'p' in op:
         switch (op.p) {
+          case '❤':
+            // ignore the heartbeats
+            break;
           case 'tr_':
             this.onAppendReasoningText(op);
             break;
@@ -237,6 +241,17 @@ export class ContentReassembler {
           case '_debugDispatchRequest':
             if (this.debuggerFrameId)
               aixClientDebugger_setRequest(this.debuggerFrameId, op.dispatchRequest);
+            break;
+          case '_debugProfiler':
+            if (this.debuggerFrameId)
+              aixClientDebugger_setProfilerMeasurements(this.debuggerFrameId, op.measurements);
+            // Profiling particles will come in if the app is in "Debug Mode" + it's a Development build!
+            // Additionally to show them on the console (rather than just in the debugger) set the
+            // constant to `true`.
+            if (DEBUG_LOG_PROFILER_ON_CLIENT) {
+              console.warn('[AIX] chatGenerate profiler measurements:');
+              console.table(op.measurements);
+            }
             break;
           case 'end':
             this.onCGEnd(op);
