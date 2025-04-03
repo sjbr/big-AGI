@@ -8,7 +8,7 @@ import WidthWideIcon from '@mui/icons-material/WidthWide';
 
 import { FormLabelStart } from '~/common/components/forms/FormLabelStart';
 import { FormRadioControl } from '~/common/components/forms/FormRadioControl';
-import { useUIPreferencesStore } from '~/common/state/store-ui';
+import { useUIPreferencesStore } from '~/common/stores/store-ui';
 import { isPwa } from '~/common/util/pwaUtils';
 import { optimaOpenModels } from '~/common/layout/optima/useOptima';
 import { useIsMobile } from '~/common/components/useMatchMedia';
@@ -90,8 +90,8 @@ export function AppChatSettingsUI() {
     )}
 
     <FormControl orientation='horizontal' sx={{ justifyContent: 'space-between' }}>
-      <FormLabelStart title='Edit mode'
-                      description={doubleClickToEdit ? 'Double click' : 'Three dots'} />
+      <FormLabelStart title={isMobile ? 'Edit Mode' : 'Easy Edit'}
+                      description={doubleClickToEdit ? (isMobile ? 'Double tap' : 'Double click') : (isMobile ? 'Menu' : 'Shift + double-click')} />
       <Switch checked={doubleClickToEdit} onChange={handleDoubleClickToEditChange}
               endDecorator={doubleClickToEdit ? 'On' : 'Off'}
               slotProps={{ endDecorator: { sx: { minWidth: 26 } } }} />
@@ -123,4 +123,4 @@ export function AppChatSettingsUI() {
     )}
 
   </>;
-}
+};
