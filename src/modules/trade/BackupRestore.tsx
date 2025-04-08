@@ -3,15 +3,18 @@
 import * as React from 'react';
 import { fileOpen, fileSave, FileWithHandle } from 'browser-fs-access';
 
-import { Box, Button, Divider, Sheet, Typography } from '@mui/joy';
+import { Box, Button, Divider, FormControl, FormLabel, Sheet, Switch, Typography } from '@mui/joy';
 import DownloadIcon from '@mui/icons-material/Download';
 import DoneIcon from '@mui/icons-material/Done';
 import ErrorIcon from '@mui/icons-material/Error';
 import RestoreIcon from '@mui/icons-material/Restore';
+import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
 
 import { GoodModal } from '~/common/components/modals/GoodModal';
+import { Is } from '~/common/util/pwaUtils';
 import { Release } from '~/common/app.release';
-import { logger } from '~/common/logger';
+import { createModuleLogger } from '~/common/logger';
+import { downloadBlob } from '~/common/util/downloadUtils';
 
 
 // configuration
@@ -31,6 +34,7 @@ const INCLUDED_IDB_KEYS: { [dbName: string]: { [storeName: string]: string[]; };
 
 
 // Flashing Backup Schema
+// NOTE: ABSOLUTELY NOT CHANGE WITHOUT CHANGING THE saveFlashObjectOrThrow_Streaming TOO (!)
 interface DFlashSchema {
   _t: 'agi.flash-backup';
   _v: number;
@@ -48,6 +52,8 @@ interface DFlashSchema {
 
 
 // -- Utility Functions --
+
+const logger = createModuleLogger('client', 'flash');
 
 function _getErrorText(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -74,11 +80,11 @@ async function getAllLocalStorageKeyValues(): Promise<Record<string, any>> {
           }
         }
       } catch (error) {
-        console.error(`backup-restore: Error reading localStorage key "${key}":`, error);
+        console.error(`Error reading localStorage key "${key}":`, error);
       }
     }
   } catch (error) {
-    console.error('backup-restore: Error accessing localStorage:', error);
+    console.error('Error accessing localStorage:', error);
     // return what we have
   }
   return data;
@@ -96,11 +102,11 @@ async function getAllIndexedDBData(ignoreExclusions: boolean): Promise<Record<st
       try {
         data[dbName] = await getIndexedDBContent(dbName);
       } catch (error) {
-        console.error(`backup-restore: Error getting content for IndexedDB "${dbName}":`, error);
+        console.error(`Error getting content for IndexedDB "${dbName}":`, error);
       }
     }
   } catch (error) {
-    console.error('backup-restore: Error processing IndexedDB databases:', error);
+    console.error('Error processing IndexedDB databases:', error);
     // return what we have
   }
   return data;
@@ -135,7 +141,7 @@ async function listIndexedDBDatabaseNames(): Promise<string[]> {
 
     return existingDbs;
   } catch (error) {
-    console.error('backup-restore: Error listing IndexedDB databases:', error);
+    logger.error('Error listing IndexedDB databases:', error);
     return [];
   }
 }
@@ -187,14 +193,14 @@ function getIndexedDBContent(dbName: string): Promise<Record<string, { key: any;
           transactionError = true;
           const target = event.target as IDBTransaction;
           const errorMsg = target.error ? target.error.message : 'Unknown error';
-          logger.error(`backup-restore: transaction error in "${dbName}": ${errorMsg}`);
+          logger.error(`transaction error in "${dbName}": ${errorMsg}`);
           // Don't reject - we'll resolve with partial data at completion
         };
 
         transaction.oncomplete = () => {
           db.close();
           if (transactionError)
-            logger.warn(`backup-restore: transaction for "${dbName}" completed with some errors. Data may be incomplete.`);
+            logger.warn(`transaction for "${dbName}" completed with some errors. Data may be incomplete.`);
           resolve(dbData);
         };
 
@@ -218,13 +224,13 @@ function getIndexedDBContent(dbName: string): Promise<Record<string, { key: any;
                 try {
                   cursor.continue();
                 } catch (error) {
-                  logger.error(`backup-restore: Error continuing cursor for store "${storeName}":`, error);
+                  logger.error(`Error continuing cursor for store "${storeName}":`, error);
                   // Can't continue but we have some data
                 }
               }
             };
           } catch (error) {
-            logger.error(`backup-restore: Error processing store "${storeName}":`, error);
+            logger.error(`Error processing store "${storeName}":`, error);
             // Continue with other stores
           }
         });
@@ -247,7 +253,7 @@ async function restoreLocalStorage(data: Record<string, any>): Promise<void> {
         const value = data[key];
         localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
       } catch (error) {
-        console.error(`Error restoring localStorage key "${key}":`, error);
+        logger.error(`Error restoring localStorage key "${key}":`, error);
       }
     }
   } catch (error) {
@@ -259,7 +265,6 @@ async function restoreIndexedDB(allDbData: Record<string, any>): Promise<void> {
   // process each database in sequence
   for (const dbName in allDbData) {
     try {
-      console.log(`Starting restore for database: ${dbName}`);
       const dbStoresData = allDbData[dbName] as Record<string, { key: any; value: any }[]>;
 
       await new Promise<void>((resolve, reject) => {
@@ -279,7 +284,7 @@ async function restoreIndexedDB(allDbData: Record<string, any>): Promise<void> {
               .filter(name => existingStoreNames.includes(name));
 
             if (storesToRestore.length === 0) {
-              console.log(`No matching stores found in ${dbName}, skipping`);
+              logger.warn(`No matching stores found in ${dbName}, skipping`);
               db.close();
               resolve();
               return;
@@ -294,16 +299,16 @@ async function restoreIndexedDB(allDbData: Record<string, any>): Promise<void> {
                 transactionFailed = true;
                 const target = event.target as IDBTransaction;
                 const errorMsg = target.error ? target.error.message : 'Unknown error';
-                console.error(`Transaction error during restore of "${dbName}": ${errorMsg}`);
+                logger.error(`Transaction error during restore of "${dbName}": ${errorMsg}`);
                 // Don't reject - we'll resolve at completion
               };
 
               transaction.oncomplete = () => {
                 db.close();
                 if (transactionFailed) {
-                  console.warn(`Transaction for "${dbName}" completed with some errors. Restore may be incomplete.`);
+                  logger.warn(`Transaction for "${dbName}" completed with some errors. Restore may be incomplete.`);
                 } else {
-                  console.log(`Successfully restored database: ${dbName}`);
+                  logger.info(`Successfully restored database: ${dbName}`);
                 }
                 resolve();
               };
@@ -320,7 +325,7 @@ async function restoreIndexedDB(allDbData: Record<string, any>): Promise<void> {
                 // 1. Clear the store
                 const clearRequest = store.clear();
                 clearRequest.onsuccess = () => {
-                  console.log(`Cleared store "${storeName}" in "${dbName}"`);
+                  // logger.debug(`Cleared store "${storeName}" in "${dbName}"`);
 
                   // 2. Add all items back
                   let itemsProcessed = 0;
@@ -338,7 +343,7 @@ async function restoreIndexedDB(allDbData: Record<string, any>): Promise<void> {
                       request.onsuccess = () => {
                         itemsProcessed++;
                         if (itemsProcessed === items.length) {
-                          console.log(`Restored ${items.length} items to store "${storeName}"`);
+                          // logger.debug(`Restored ${items.length} items to store "${storeName}"`);
                           completedStores++;
 
                           // Process next store
@@ -347,13 +352,13 @@ async function restoreIndexedDB(allDbData: Record<string, any>): Promise<void> {
                       };
 
                       request.onerror = (event) => {
-                        console.error(`Error adding item to "${storeName}" in "${dbName}" (Key: ${
+                        logger.error(`Error adding item to "${storeName}" in "${dbName}" (Key: ${
                           typeof item.key === 'object' ? JSON.stringify(item.key) : item.key
                         }): ${(event.target as IDBRequest).error?.message || 'Unknown error'}`);
 
                         itemsProcessed++;
                         if (itemsProcessed === items.length) {
-                          console.log(`Restored ${items.length} items to store "${storeName}" with some errors`);
+                          // logger.debug(`Restored ${items.length} items to store "${storeName}" with some errors`);
                           completedStores++;
 
                           // Process next store
@@ -361,7 +366,7 @@ async function restoreIndexedDB(allDbData: Record<string, any>): Promise<void> {
                         }
                       };
                     } catch (error) {
-                      console.error(`Error processing item in "${storeName}": ${_getErrorText(error)}`);
+                      logger.error(`Error processing item in "${storeName}": ${_getErrorText(error)}`);
                       itemsProcessed++;
                       if (itemsProcessed === items.length) {
                         processNextStore(storeIndex + 1);
@@ -371,14 +376,14 @@ async function restoreIndexedDB(allDbData: Record<string, any>): Promise<void> {
 
                   // Handle empty store case
                   if (items.length === 0) {
-                    console.log(`No items to restore for store "${storeName}"`);
+                    logger.warn(`No items to restore for store "${storeName}"`);
                     completedStores++;
                     processNextStore(storeIndex + 1);
                   }
                 };
 
                 clearRequest.onerror = (event) => {
-                  console.error(`Error clearing store "${storeName}": ${(event.target as IDBRequest).error?.message || 'Unknown error'}`);
+                  logger.error(`Error clearing store "${storeName}": ${(event.target as IDBRequest).error?.message || 'Unknown error'}`);
                   // Try to continue anyway
                   completedStores++;
                   processNextStore(storeIndex + 1);
@@ -394,7 +399,7 @@ async function restoreIndexedDB(allDbData: Record<string, any>): Promise<void> {
           };
 
           openRequest.onblocked = () => {
-            console.warn(`Open request for "${dbName}" is blocked, but continuing anyway`);
+            logger.warn(`Open request for "${dbName}" is blocked, but continuing anyway`);
             // Let onsuccess or onerror handle it
           };
         } catch (error) {
@@ -402,9 +407,9 @@ async function restoreIndexedDB(allDbData: Record<string, any>): Promise<void> {
         }
       });
 
-      console.log(`Completed restore process for: ${dbName}`);
+      // logger.log(`Completed restore process for: ${dbName}`);
     } catch (error) {
-      console.error(`Error restoring database "${dbName}": ${_getErrorText(error)}`);
+      logger.error(`Error restoring database "${dbName}": ${_getErrorText(error)}`);
       // Continue with other databases even if one fails
     }
   }
@@ -431,9 +436,129 @@ function isValidBackup(data: any): data is DFlashSchema {
 /**
  * Creates a backup object and optionally saves it to a file
  */
-async function createBackupAndSaveToOrThrow(backupType: 'full' | 'auto-before-restore', ignoreExclusions: boolean, saveToFileName?: string): Promise<DFlashSchema> {
+async function saveFlashObjectOrThrow(backupType: 'full' | 'auto-before-restore', forceDownloadOverFileSave: boolean, ignoreExclusions: boolean, saveToFileName: string) {
 
-  const flashObject: DFlashSchema = {
+  // for mobile, try with the download link approach - we keep getting truncated JSON save-files in other paths, streaming or not
+  if (forceDownloadOverFileSave || !Is.Desktop)
+    return createFlashObject(backupType, ignoreExclusions)
+      .then(JSON.stringify)
+      .then((flashString) => {
+        logger.info(`Expected flash file size: ${flashString.length.toLocaleString()} bytes`);
+        downloadBlob(new Blob([flashString], { type: 'application/json' }), saveToFileName);
+        return undefined;
+      });
+
+  // for mobile, try a different implementation, with streaming creation, to hopefully avoid truncation
+  // if (forceStreaming || !Is.Desktop)
+  //   return saveFlashObjectOrThrow_Streaming(backupType, ignoreExclusions, saveToFileName);
+
+  // run after the file picker has confirmed a file
+  const flashBlobPromise = new Promise<Blob>(async (resolve) => {
+    // create the backup object (heavy operation)
+    const flashObject = await createFlashObject(backupType, ignoreExclusions);
+
+    // WARNING: on Mobile, the JSON serialization could fail silently - we disable pretty-print to conserve space
+    const flashString = !Is.Desktop ? JSON.stringify(flashObject)
+      : JSON.stringify(flashObject, null, 2);
+
+    logger.info(`Expected flash file size: ${flashString.length.toLocaleString()} bytes`);
+
+    resolve(new Blob([flashString], { type: 'application/json' }));
+  });
+
+  return await fileSave(flashBlobPromise, {
+    description: BACKUP_FILE_FORMAT,
+    extensions: ['.agi.json', '.json'],
+    fileName: saveToFileName,
+  });
+}
+
+// async function saveFlashObjectOrThrow_Streaming(backupType: 'full' | 'auto-before-restore', ignoreExclusions: boolean, saveToFileName: string) {
+//
+//   // on mobile, stringify without spaces
+//   const spacesForMobile = Is.Desktop ? 2 : undefined;
+//
+//   // create JSON in chunks without ever holding the entire string in memory
+//   const encoder = new TextEncoder();
+//
+//   // create a streaming response - this is the key to avoiding truncation
+//   const response = new Response(
+//     new ReadableStream({
+//       async start(controller) {
+//         try {
+//           // start the JSON object
+//           controller.enqueue(encoder.encode('{\n'));
+//           controller.enqueue(encoder.encode(`  "_t": "agi.flash-backup",\n`));
+//           controller.enqueue(encoder.encode(`  "_v": ${BACKUP_FORMAT_VERSION_NUMBER},\n`));
+//           controller.enqueue(encoder.encode(`  "metadata": ${JSON.stringify({
+//             version: BACKUP_FORMAT_VERSION,
+//             timestamp: new Date().toISOString(),
+//             application: 'Big-AGI',
+//             backupType,
+//           }, null, spacesForMobile).replace(/^/gm, '  ')},\n`));
+//
+//           // stream storage section
+//           controller.enqueue(encoder.encode('  "storage": {\n'));
+//
+//           // add localStorage (usually smaller)
+//           const localStorage = await getAllLocalStorageKeyValues();
+//           controller.enqueue(encoder.encode('    "localStorage": '));
+//           controller.enqueue(encoder.encode(JSON.stringify(localStorage, null, spacesForMobile).replace(/^/gm, '    ')));
+//           controller.enqueue(encoder.encode(',\n'));
+//
+//           // add indexedDB with manual chunking for large objects
+//           controller.enqueue(encoder.encode('    "indexedDB": {\n'));
+//
+//           const indexedDB = await getAllIndexedDBData(ignoreExclusions);
+//           const dbNames = Object.keys(indexedDB);
+//           for (let i = 0; i < dbNames.length; i++) {
+//             const dbName = dbNames[i];
+//             const isLast = i === dbNames.length - 1;
+//
+//             controller.enqueue(encoder.encode(`      "${dbName}": `));
+//
+//             // clean nulls and control characters
+//             const sanitized = JSON.stringify(indexedDB[dbName], (_key, value) => {
+//               if (typeof value === 'string')
+//                 return value.replace(/\u0000/g, '');
+//               return value;
+//             }, spacesForMobile).replace(/^/gm, '      ');
+//
+//             controller.enqueue(encoder.encode(sanitized));
+//             controller.enqueue(encoder.encode(isLast ? '\n' : ',\n'));
+//           }
+//
+//           // close all objects
+//           controller.enqueue(encoder.encode('    }\n'));
+//           controller.enqueue(encoder.encode('  }\n'));
+//           controller.enqueue(encoder.encode('}\n'));
+//
+//           controller.close();
+//         } catch (error) {
+//           console.error('Error creating stream:', error);
+//           controller.error(error);
+//         }
+//       },
+//     }),
+//     {
+//       headers: {
+//         'Content-Type': 'application/json',
+//         'Content-Disposition': `attachment; filename="${saveToFileName}"`,
+//       },
+//     },
+//   );
+//
+//   // the fileSave implementation will use the body.pipeTo(writable) code path
+//   // which is perfect for large files as it streams directly to disk
+//   await fileSave(response, {
+//     description: BACKUP_FILE_FORMAT,
+//     extensions: ['.agi.json', '.json'],
+//     fileName: saveToFileName,
+//   });
+// }
+
+async function createFlashObject(backupType: 'full' | 'auto-before-restore', ignoreExclusions: boolean): Promise<DFlashSchema> {
+  return {
     _t: 'agi.flash-backup',
     _v: BACKUP_FORMAT_VERSION_NUMBER,
     metadata: {
@@ -447,17 +572,6 @@ async function createBackupAndSaveToOrThrow(backupType: 'full' | 'auto-before-re
       indexedDB: await getAllIndexedDBData(ignoreExclusions),
     },
   };
-
-  if (saveToFileName) {
-    const backupBlob = new Blob([JSON.stringify(flashObject, null, 2)], { type: 'application/json' });
-    await fileSave(backupBlob, {
-      fileName: saveToFileName,
-      extensions: ['.json'],
-      description: 'Big-AGI V2 Flash File',
-    });
-  }
-
-  return flashObject;
 }
 
 
@@ -488,7 +602,7 @@ export function FlashRestore(props: { unlockRestore?: boolean }) {
     let file: FileWithHandle;
     try {
       file = await fileOpen({
-        extensions: ['.json'],
+        extensions: ['.agi.json', '.json'],
         description: BACKUP_FILE_FORMAT,
         mimeTypes: ['application/json'],
       });
@@ -521,7 +635,7 @@ export function FlashRestore(props: { unlockRestore?: boolean }) {
       setBackupDataForRestore(data);
       setRestoreState('confirm');
     } catch (error: any) {
-      console.error('Restore preparation failed:', error);
+      logger.error('Restore preparation failed:', error);
       setRestoreState('error');
       setErrorMessage(`Restore failed: ${_getErrorText(error)}`);
     }
@@ -533,20 +647,29 @@ export function FlashRestore(props: { unlockRestore?: boolean }) {
     setErrorMessage(null);
     try {
       // 1. Auto-backup current state (best effort)
-      try {
-        const dateStr = new Date().toISOString().split('.')[0].replace('T', '-');
-        await createBackupAndSaveToOrThrow('auto-before-restore', false, `Big-AGI-auto-pre-flash-${dateStr}.agi.json`);
-        logger.info('backup-restore: Created auto-backup before restore');
-      } catch (error) {
-        logger.warn('backup-restore: Auto-backup before restore failed:', error);
-        // non-fatal, proceed with restore
-      }
+      // NOTE: disabled: more confusing/harmful than useful
+      // try {
+      //   const dateStr = new Date().toISOString().split('.')[0].replace('T', '-');
+      //   await saveFlashObjectOrThrow(
+      //     'auto-before-restore',
+      //     true, // auto-backup with streaming
+      //     false, // auto-backup without images
+      //     `Big-AGI-auto-pre-flash-${dateStr}.json`,
+      //   );
+      //   logger.info('Created auto-backup before restore');
+      // } catch (error: any) {
+      //   if (error?.name === 'AbortError')
+      //     logger.warn('Auto-backup before restore dismissed by the user');
+      //   else
+      //     logger.warn('Auto-backup before restore failed:', error);
+      //   // non-fatal, proceed with restore
+      // }
 
       // 2. Restore data (localStorage first, then IndexedDB)
       await restoreLocalStorage(backupDataForRestore.storage.localStorage);
-      logger.info('backup-restore: localStorage restore complete');
+      logger.info('localStorage restore complete');
       await restoreIndexedDB(backupDataForRestore.storage.indexedDB);
-      logger.info('backup-restore: indexedDB restore complete');
+      logger.info('indexedDB restore complete');
       setRestoreState('success');
 
       // 3. Alert and reload
@@ -619,9 +742,9 @@ export function FlashRestore(props: { unlockRestore?: boolean }) {
         This will <Typography fontWeight='lg' color='danger'>replace all current application data</Typography> with the content from the selected flash file.&nbsp;
         <Typography fontWeight='lg' color='danger'>WARNING: This is a destructive operation that may break the app.</Typography>
       </Typography>
-      <Typography fontWeight='md'>
-        An automatic backup of your current data will be attempted before proceeding.
-      </Typography>
+      {/*<Typography fontWeight='md'>*/}
+      {/*  An automatic backup of your current data will be attempted before proceeding.*/}
+      {/*</Typography>*/}
       {backupDataForRestore?.metadata && (
         <Box sx={{ mt: 1, p: 1.5, bgcolor: 'background.level1', borderRadius: 'sm', border: '1px solid', borderColor: 'neutral.outlinedBorder', fontSize: 'sm' }}>
           <Box fontWeight='md' mb={1}>Flash File Details:</Box>
@@ -653,6 +776,7 @@ export function FlashBackup(props: {
 }) {
 
   // state
+  const [includeImages, setIncludeImages] = React.useState(false);
   const [backupState, setBackupState] = React.useState<'idle' | 'processing' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
@@ -668,24 +792,29 @@ export function FlashBackup(props: {
     try {
       onStartedBackup?.();
       const dateStr = new Date().toISOString().split('.')[0].replace('T', '-');
-      await createBackupAndSaveToOrThrow('full', event.shiftKey, `Big-AGI-flash${event.shiftKey ? '+images' : ''}-${dateStr}.agi.json`);
-      setBackupState('success');
+      const success = await saveFlashObjectOrThrow(
+        'full',
+        event.ctrlKey, // control forces a traditional browser download - default: fileSave
+        includeImages,
+        `Big-AGI-flash${includeImages ? '+images' : ''}${event.ctrlKey ? '-download' : ''}-${dateStr}.json`,
+      );
+      setBackupState(success ? 'success' : 'idle');
     } catch (error: any) {
       if (error?.name === 'AbortError') {
         // the user has closed the file picker, most likely - do nothing
         setBackupState('idle');
       } else {
-        logger.error(`backup-restore: Backup failed:`, error);
+        logger.error(`Backup failed:`, error);
         setBackupState('error');
         setErrorMessage(`Backup failed: ${_getErrorText(error)}`);
       }
     }
-  }, [onStartedBackup]);
+  }, [includeImages, onStartedBackup]);
 
 
   return <>
 
-    <Typography level='body-sm' mt={5}>
+    <Typography level='body-sm' mt={3}>
       Save <strong>all settings and chats</strong>:
     </Typography>
     <Button
@@ -696,6 +825,7 @@ export function FlashBackup(props: {
       loading={isProcessing}
       endDecorator={backupState === 'success' ? <DoneIcon /> : backupState === 'error' ? <ErrorIcon /> : <DownloadIcon />}
       onClick={handleFullBackup}
+      onDoubleClick={console.log}
       sx={{
         boxShadow: 'md',
         backgroundColor: 'background.popup',
@@ -704,9 +834,15 @@ export function FlashBackup(props: {
     >
       {backupState === 'success' ? 'Backup Saved' : backupState === 'error' ? 'Backup Failed' : isProcessing ? 'Backing Up...' : 'Export All'}
     </Button>
-    {!errorMessage && <Typography level='body-xs'>
-      Shift + Click to include images
-    </Typography>}
+    {!errorMessage && <>
+      <FormControl orientation='horizontal' sx={{ justifyContent: 'space-between', alignItems: 'center', ml: 2, mr: 1.25, mt: 0.25 }}>
+        <FormLabel sx={{ fontWeight: 'md' }}>Include Binary Images</FormLabel>
+        <Switch size='sm' color={includeImages ? 'danger' : undefined} checked={includeImages} onChange={(event) => setIncludeImages(event.target.checked)} />
+      </FormControl>
+      {includeImages && <Typography level='body-xs' color='danger' ml={2} endDecorator={<WarningRoundedIcon />}>
+        Files too large may get corrupted.
+      </Typography>}
+    </>}
 
     {errorMessage && (
       <Sheet variant='soft' color='danger' sx={{ px: 1.5, py: 1, borderRadius: 'sm', display: 'grid', gap: 1 }}>
