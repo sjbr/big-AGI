@@ -1,6 +1,6 @@
 import type { OpenAIWire_API_Models_List } from '~/modules/aix/server/dispatch/wiretypes/openai.wiretypes';
 
-import { LLM_IF_HOTFIX_NoStream, LLM_IF_HOTFIX_NoTemperature, LLM_IF_HOTFIX_StripImages, LLM_IF_HOTFIX_Sys0ToUsr0, LLM_IF_OAI_Chat, LLM_IF_OAI_Complete, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_NeedsAudio, LLM_IF_OAI_PromptCaching, LLM_IF_OAI_Realtime, LLM_IF_OAI_Reasoning, LLM_IF_OAI_Vision } from '~/common/stores/llms/llms.types';
+import { LLM_IF_HOTFIX_NoStream, LLM_IF_HOTFIX_NoTemperature, LLM_IF_HOTFIX_StripImages, LLM_IF_HOTFIX_Sys0ToUsr0, LLM_IF_OAI_Chat, LLM_IF_OAI_Complete, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_NeedsAudio, LLM_IF_OAI_PromptCaching, LLM_IF_OAI_Realtime, LLM_IF_OAI_Reasoning, LLM_IF_OAI_Vision, LLM_IF_Tools_WebSearch } from '~/common/stores/llms/llms.types';
 
 import type { ModelDescriptionSchema } from '../../llm.server.types';
 import { fromManualMapping, ManualMappings } from './models.data';
@@ -41,6 +41,86 @@ export const _knownOpenAIChatModels: ManualMappings = [
     isPreview: true,
   },
 
+
+  /// GPT-4.1 series
+
+  // GPT-4.1
+  {
+    idPrefix: 'gpt-4.1',
+    label: 'GPT-4.1',
+    description: 'Flagship GPT model for complex tasks. Currently points to gpt-4.1-2025-04-14.',
+    symLink: 'gpt-4.1-2025-04-14',
+    hidden: true, // we prefer versioned models to symlinked
+    // copied from symlinked
+    contextWindow: 1047576,
+    maxCompletionTokens: 32768,
+    trainingDataCutoff: 'May 31, 2024',
+    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Vision, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_PromptCaching],
+    chatPrice: { input: 2, cache: { cType: 'oai-ac', read: 0.5 }, output: 8 },
+  },
+  {
+    isLatest: true,
+    idPrefix: 'gpt-4.1-2025-04-14',
+    label: 'GPT-4.1 (2025-04-14)',
+    description: 'Flagship GPT model for complex tasks. Major improvements on coding, instruction following, and long context with 1M token context window.',
+    contextWindow: 1047576,
+    maxCompletionTokens: 32768,
+    trainingDataCutoff: 'May 31, 2024',
+    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Vision, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_PromptCaching],
+    chatPrice: { input: 2, cache: { cType: 'oai-ac', read: 0.5 }, output: 8 },
+  },
+
+  // GPT-4.1 mini
+  {
+    idPrefix: 'gpt-4.1-mini',
+    label: 'GPT-4.1 Mini',
+    description: 'Balanced for intelligence, speed, and cost. Currently points to gpt-4.1-mini-2025-04-14.',
+    symLink: 'gpt-4.1-mini-2025-04-14',
+    hidden: true, // we prefer versioned models to symlinked
+    // copied from symlinked
+    contextWindow: 1047576,
+    maxCompletionTokens: 32768,
+    trainingDataCutoff: 'May 31, 2024',
+    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Vision, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_PromptCaching],
+    chatPrice: { input: 0.4, cache: { cType: 'oai-ac', read: 0.1 }, output: 1.6 },
+  },
+  {
+    isLatest: true,
+    idPrefix: 'gpt-4.1-mini-2025-04-14',
+    label: 'GPT-4.1 Mini (2025-04-14)',
+    description: 'Balanced for intelligence, speed, and cost. Matches or exceeds GPT-4o in intelligence while reducing latency by nearly half and cost by 83%.',
+    contextWindow: 1047576,
+    maxCompletionTokens: 32768,
+    trainingDataCutoff: 'May 31, 2024',
+    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Vision, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_PromptCaching],
+    chatPrice: { input: 0.4, cache: { cType: 'oai-ac', read: 0.1 }, output: 1.6 },
+  },
+
+  // GPT-4.1 nano
+  {
+    idPrefix: 'gpt-4.1-nano',
+    label: 'GPT-4.1 Nano',
+    description: 'Fastest, most cost-effective GPT 4.1 model. Currently points to gpt-4.1-nano-2025-04-14.',
+    symLink: 'gpt-4.1-nano-2025-04-14',
+    hidden: true, // we prefer versioned models to symlinked
+    // copied from symlinked
+    contextWindow: 1047576,
+    maxCompletionTokens: 32768,
+    trainingDataCutoff: 'May 31, 2024',
+    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Vision, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_PromptCaching],
+    chatPrice: { input: 0.1, cache: { cType: 'oai-ac', read: 0.025 }, output: 0.4 },
+  },
+  {
+    isLatest: true,
+    idPrefix: 'gpt-4.1-nano-2025-04-14',
+    label: 'GPT-4.1 Nano (2025-04-14)',
+    description: 'Fastest, most cost-effective GPT 4.1 model. Delivers exceptional performance with low latency, ideal for tasks like classification or autocompletion.',
+    contextWindow: 1047576,
+    maxCompletionTokens: 32768,
+    trainingDataCutoff: 'May 31, 2024',
+    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Vision, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_PromptCaching],
+    chatPrice: { input: 0.1, cache: { cType: 'oai-ac', read: 0.025 }, output: 0.4 },
+  },
 
   /// Reasoning models
 
@@ -235,7 +315,6 @@ export const _knownOpenAIChatModels: ManualMappings = [
     benchmark: { cbaElo: 1288 }, // no direct CSV match, left as-is (1286 + 2 → 1288)
   },
   {
-    isLatest: true,
     idPrefix: 'gpt-4o-2024-11-20',
     label: 'GPT-4o (2024-11-20)',
     description: 'Snapshot of gpt-4o from November 20th, 2024.',
@@ -293,7 +372,7 @@ export const _knownOpenAIChatModels: ManualMappings = [
     contextWindow: 128000,
     maxCompletionTokens: 16384,
     trainingDataCutoff: 'Sep 30, 2023',
-    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Json, LLM_IF_HOTFIX_NoTemperature], // NOTE: 2025-03-15: confirmed on 'playground' that this model does not support images
+    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Json, LLM_IF_HOTFIX_NoTemperature, LLM_IF_Tools_WebSearch], // NOTE: 2025-03-15: confirmed on 'playground' that this model does not support images
     parameterSpecs: [{ paramId: 'llmVndOaiWebSearchContext' }, { paramId: 'llmVndOaiWebSearchGeolocation' }],
     chatPrice: { input: 2.5, output: 10 },
     isPreview: true,
@@ -306,7 +385,7 @@ export const _knownOpenAIChatModels: ManualMappings = [
     contextWindow: 128000,
     maxCompletionTokens: 16384,
     trainingDataCutoff: 'Sep 30, 2023',
-    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Json, LLM_IF_HOTFIX_NoTemperature], // NOTE: 2025-03-15: confirmed on 'playground' that this model does not support images
+    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Json, LLM_IF_HOTFIX_NoTemperature, LLM_IF_Tools_WebSearch], // NOTE: 2025-03-15: confirmed on 'playground' that this model does not support images
     parameterSpecs: [{ paramId: 'llmVndOaiWebSearchContext' }, { paramId: 'llmVndOaiWebSearchGeolocation' }],
     chatPrice: { input: 2.5, output: 10 },
     isPreview: true,
@@ -483,7 +562,7 @@ export const _knownOpenAIChatModels: ManualMappings = [
     contextWindow: 128000,
     maxCompletionTokens: 16384,
     trainingDataCutoff: 'Sep 30, 2023',
-    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Json, LLM_IF_HOTFIX_NoTemperature], // NOTE: this support function calling, but only its own, not a Custom Function
+    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Json, LLM_IF_HOTFIX_NoTemperature, LLM_IF_Tools_WebSearch], // NOTE: this support function calling, but only its own, not a Custom Function
     parameterSpecs: [{ paramId: 'llmVndOaiWebSearchContext' }, { paramId: 'llmVndOaiWebSearchGeolocation' }],
     chatPrice: { input: 0.15, output: 0.6 },
     isPreview: true,
@@ -496,7 +575,7 @@ export const _knownOpenAIChatModels: ManualMappings = [
     contextWindow: 128000,
     maxCompletionTokens: 16384,
     trainingDataCutoff: 'Sep 30, 2023',
-    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Json, LLM_IF_HOTFIX_NoTemperature], // NOTE: this support function calling, but only its own, not a Custom Function
+    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Json, LLM_IF_HOTFIX_NoTemperature, LLM_IF_Tools_WebSearch], // NOTE: this support function calling, but only its own, not a Custom Function
     parameterSpecs: [{ paramId: 'llmVndOaiWebSearchContext' }, { paramId: 'llmVndOaiWebSearchGeolocation' }],
     chatPrice: { input: 0.15, output: 0.6 },
     isPreview: true,
@@ -790,6 +869,13 @@ const _manualOrderingIdPrefixes = [
   'gpt-4.5-20',
   'gpt-4.5-preview',
   'gpt-4.5-',
+  // GPT-4.1
+  'gpt-4.1-20',
+  'gpt-4.1-mini-20',
+  'gpt-4.1-mini',
+  'gpt-4.1-nano-20',
+  'gpt-4.1-nano',
+  'gpt-4.1',
   // Preferred models
   'gpt-4o-20',
   'gpt-4o-search-20',
