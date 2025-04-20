@@ -288,15 +288,21 @@ export function useChatDrawerRenderItems(
             : filterHasDocFragments ? 'No attachment results'
               : filterHasImageAssets ? 'No image results'
                 : filterHasStars ? 'No starred results'
-                  : isSearching ? 'Text not found'
-                    : 'No conversations in folder',
+                  : filterIsArchived ? 'No archived conversations'
+                    : isSearching ? 'Text not found'
+                      : 'No conversations in folder',
         });
       } else {
         // filtering reminder (will be rendered with a clear button too)
-        if (filterHasStars || filterHasImageAssets || filterHasDocFragments) {
+        if (filterHasStars || filterHasImageAssets || filterHasDocFragments || filterIsArchived) {
           renderNavItems.unshift({
             type: 'nav-item-info-message',
-            message: `Filtering by ${filterHasStars ? 'stars' : ''}${filterHasStars && filterHasImageAssets ? ', ' : ''}${filterHasImageAssets ? 'images' : ''}${(filterHasStars || filterHasImageAssets) && filterHasDocFragments ? ', ' : ''}${filterHasDocFragments ? 'attachments' : ''}`,
+            message: `${filterIsArchived ? 'Showing' : 'Filtering by'} ${[
+              filterHasStars && 'stars',
+              filterHasImageAssets && 'images',
+              filterHasDocFragments && 'attachments',
+              filterIsArchived && 'archived',
+            ].filter(Boolean).join(', ')}`,
           });
         }
       }
