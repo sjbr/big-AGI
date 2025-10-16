@@ -392,8 +392,8 @@ export namespace AixWire_Tooling {
   /**
    * Policy for tools that the model can use:
    * - auto: can use a tool or not (default, same as not specifying a policy)
-   * - any: must use one tool at least
-   * - function_call: must use a specific Function Tool
+   * - any: MUST use one tool at least
+   * - function_call: MUST use a specific Function Tool
    * - none: same as not giving the model any tool [REMOVED - just give no tools]
    */
   export const ToolsPolicy_schema = z.discriminatedUnion('type', [
@@ -426,6 +426,8 @@ export namespace AixWire_API {
     topP: z.number().min(0).max(1).optional(),
     forceNoStream: z.boolean().optional(),
     vndAntThinkingBudget: z.number().nullable().optional(),
+    vndGeminiAspectRatio: z.enum(['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9']).optional(),
+    vndGeminiGoogleSearch: z.enum(['unfiltered', '1d', '1w', '1m', '6m', '1y']).optional(),
     vndGeminiShowThoughts: z.boolean().optional(),
     vndGeminiThinkingBudget: z.number().optional(),
     vndOaiResponsesAPI: z.boolean().optional(),
@@ -493,6 +495,7 @@ export namespace AixWire_API {
   export const ConnectionOptions_schema = z.object({
     debugDispatchRequest: z.boolean().optional(),
     debugProfilePerformance: z.boolean().optional(),
+    enableResumability: z.boolean().optional(), // enable response storage for resumability (first found in the OpenAI Responses API)
     throttlePartTransmitter: z.number().optional(), // in ms
     // retry: z.number().optional(),
     // retryDelay: z.number().optional(),
@@ -557,7 +560,8 @@ export namespace AixWire_Particles {
     | { cg: 'issue', issueId: CGIssueId, issueText: string }
     | { cg: 'set-metrics', metrics: CGSelectMetrics }
     | { cg: 'set-model', name: string }
-    | { cg: '_debugDispatchRequest', security: 'dev-env', dispatchRequest: { url: string, headers: string, body: string } } // may generalize this in the future
+    | { cg: 'set-upstream-handle', handle: { uht: 'vnd.oai.responses', responseId: string, expiresAt: number | null } }
+    | { cg: '_debugDispatchRequest', security: 'dev-env', dispatchRequest: { url: string, headers: string, body: string, bodySize: number } } // may generalize this in the future
     | { cg: '_debugProfiler', measurements: Record<string, number | string>[] };
 
   export type CGEndReason =     // the reason for the end of the chat generation
@@ -579,11 +583,13 @@ export namespace AixWire_Particles {
   export type GCTokenStopReason =
     | 'ok'                      // clean, including reaching 'stop sequences'
     | 'ok-tool_invocations'     // clean & tool invocations
+    | 'ok-pause_continue'       // clean, but paused (e.g. Anthropic server tools like web search) - requires continuation
     // premature:
-    | 'cg-issue'                // [1][2] chat-generation issue (see CGIssueId)
+    | 'cg-issue'                // [1][2] chat-generation issue (see CGIssueId, mostly a dispatch or dialect issue)
     | 'client-abort-signal'     // the client aborted - likely a user/auto initiation
     | 'filter-content'          // content filter (e.g. profanity)
     | 'filter-recitation'       // recitation filter (e.g. recitation)
+    | 'filter-refusal'          // safety refusal filter (e.g. Anthropic safety concerns)
     | 'out-of-tokens';          // got out of tokens
 
   /**

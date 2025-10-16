@@ -269,7 +269,7 @@ async function restoreLocalStorage(data: Record<string, any>): Promise<void> {
 }
 
 async function restoreIndexedDB(allDbData: Record<string, any>): Promise<void> {
-  // expected local DBs to restore over, from the latest `v2-dev` (2025-05-14)
+  // expected local DBs to restore over, from the latest `main` (was: `v2-dev`, 2025-05-14)
   const dbTargetVersions: { [dbName: string]: number } = {
     'keyval-store': 1,
     'Big-AGI': 10, // Dexie multiplied the version (1) by 10 (https://github.com/dexie/Dexie.js/issues/59)
@@ -816,7 +816,7 @@ export function FlashRestore(props: { unlockRestore?: boolean }) {
 
     {/* Confirmation Dialog */}
     <GoodModal
-      title={`Confirm ${Release.App.versionName} Restore`}
+      title={`Confirm Restore`}
       strongerTitle
       dividers
       hideBottomClose
