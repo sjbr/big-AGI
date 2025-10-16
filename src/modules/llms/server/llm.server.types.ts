@@ -78,6 +78,8 @@ const ModelParameterSpec_schema = z.object({
     'llmTopP',
     'llmForceNoStream',
     'llmVndAntThinkingBudget',
+    'llmVndGeminiAspectRatio',
+    'llmVndGeminiGoogleSearch',
     'llmVndGeminiShowThoughts',
     'llmVndGeminiThinkingBudget',
     'llmVndOaiReasoningEffort',
@@ -102,7 +104,7 @@ const ModelParameterSpec_schema = z.object({
 
 export const ModelDescription_schema = z.object({
   id: z.string(),
-  idVariant: z.string().optional(),
+  idVariant: z.string().optional(), // only used on the client by '_createDLLMFromModelDescription' to instantiate 'unique' copies of the same model
   label: z.string(),
   created: z.number().optional(),
   updated: z.number().optional(),

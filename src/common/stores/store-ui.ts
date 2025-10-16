@@ -4,6 +4,7 @@ import { persist } from 'zustand/middleware';
 
 import type { ContentScaling, UIComplexityMode } from '~/common/app.theme';
 import { BrowserLang } from '~/common/util/pwaUtils';
+import { Release } from '~/common/app.release';
 
 
 // UI Preferences
@@ -44,8 +45,16 @@ interface UIPreferencesStore {
   showPersonaFinder: boolean;
   setShowPersonaFinder: (showPersonaFinder: boolean) => void;
 
+  showModelsHidden: boolean;
+  setShowModelsHidden: (showModelsHidden: boolean) => void;
+
   composerQuickButton: 'off' | 'call' | 'beam';
   setComposerQuickButton: (composerQuickButton: 'off' | 'call' | 'beam') => void;
+
+  // Advanced features
+
+  aixInspector: boolean;
+  toggleAixInspector: () => void;
 
   // UI Dismissals
 
@@ -100,8 +109,16 @@ export const useUIPreferencesStore = create<UIPreferencesStore>()(
       showPersonaFinder: false,
       setShowPersonaFinder: (showPersonaFinder: boolean) => set({ showPersonaFinder }),
 
+      showModelsHidden: false,
+      setShowModelsHidden: (showModelsHidden: boolean) => set({ showModelsHidden }),
+
       composerQuickButton: 'beam',
       setComposerQuickButton: (composerQuickButton: 'off' | 'call' | 'beam') => set({ composerQuickButton }),
+
+      // Advanced features
+
+      aixInspector: false,
+      toggleAixInspector: () => set((state) => ({ aixInspector: !state.aixInspector })),
 
       // UI Dismissals
 
@@ -132,6 +149,13 @@ export const useUIPreferencesStore = create<UIPreferencesStore>()(
        * 3: centerMode: 'full' is the new default
        */
       version: 3,
+
+      partialize: (state) => {
+        if (Release.IsNodeDevBuild) return state; // in dev, persist everything
+        // In production, exclude aixInspector from persistence
+        const { aixInspector, ...rest } = state;
+        return rest;
+      },
 
       migrate: (state: any, fromVersion: number): UIPreferencesStore => {
 
@@ -167,6 +191,10 @@ export function useUIComplexityIsMinimal(): boolean {
 
 export function useUIContentScaling(): ContentScaling {
   return useUIPreferencesStore((state) => state.contentScaling);
+}
+
+export function getAixInspector(): boolean {
+  return useUIPreferencesStore.getState().aixInspector;
 }
 
 
