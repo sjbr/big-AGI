@@ -3,14 +3,16 @@ import * as React from 'react';
 import type { SxProps } from '@mui/joy/styles/types';
 import { Box, Chip } from '@mui/joy';
 import BrushRoundedIcon from '@mui/icons-material/BrushRounded';
+import CodeIcon from '@mui/icons-material/Code';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
+import RepeatIcon from '@mui/icons-material/Repeat';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 
 import { BlocksContainer } from '~/modules/blocks/BlocksContainers';
 import { ScaledTextBlockRenderer } from '~/modules/blocks/ScaledTextBlockRenderer';
 
 import type { DMessageRole } from '~/common/stores/chat/chat.message';
-import type { DVoidPlaceholderModelOp } from '~/common/stores/chat/chat.fragments';
+import type { DVoidPlaceholderModelOp, DVoidPlaceholderPart } from '~/common/stores/chat/chat.fragments';
 import { adjustContentScaling, ContentScaling, themeScalingMap } from '~/common/app.theme';
 import { DataStreamViz } from '~/common/components/DataStreamViz';
 import { animationSpinHalfPause } from '~/common/util/animUtils';
@@ -30,6 +32,10 @@ const _styles = {
     outline: '1px solid',
     outlineColor: 'primary.solidBg', // .outlinedBorder
     boxShadow: `1px 2px 4px -3px var(--joy-palette-primary-solidBg)`,
+
+    // wrap text if needed - introduced for retry error messages
+    whiteSpace: 'normal',
+    wordBreak: 'break-word',
   } as const,
 
   followUpChipIcon: {
@@ -61,11 +67,12 @@ const _styles = {
 const modelOperationConfig = {
   'search-web': { Icon: SearchRoundedIcon, color: 'neutral' },
   'gen-image': { Icon: BrushRoundedIcon, color: 'success' },
+  'code-exec': { Icon: CodeIcon, color: 'primary' },
 } as const;
 
 
 function ModelOperationChip(props: {
-  mot: 'search-web' | 'gen-image',
+  mot: 'search-web' | 'gen-image' | 'code-exec',
   cts: number,
   text: string,
   contentScaling: ContentScaling,
@@ -111,7 +118,7 @@ function ModelOperationChip(props: {
 
 export function BlockPartPlaceholder(props: {
   placeholderText: string,
-  placeholderType?: 'chat-gen-follow-up',
+  placeholderType?: DVoidPlaceholderPart['pType'],
   placeholderModelOp?: DVoidPlaceholderModelOp,
   messageRole: DMessageRole,
   contentScaling: ContentScaling,
@@ -144,7 +151,8 @@ export function BlockPartPlaceholder(props: {
 
 
   // Type-based visualization
-  if (props.placeholderType === 'chat-gen-follow-up') return (
+  const isFollowUp = props.placeholderType === 'chat-gen-follow-up';
+  if (isFollowUp) return (
     <Chip
       color='primary'
       variant='soft'
@@ -155,6 +163,20 @@ export function BlockPartPlaceholder(props: {
       {props.placeholderText}
     </Chip>
   );
+
+  const isRetry = props.placeholderType === 'ec-retry-srv-op';
+  if (isRetry)
+    return (
+      <Chip
+        color='primary'
+        variant='soft'
+        size='sm'
+        sx={_styles.followUpChip}
+        startDecorator={<RepeatIcon sx={_styles.followUpChipIcon} />}
+      >
+        {props.placeholderText}
+      </Chip>
+    );
 
   // Model operation renderer
   if (props.placeholderModelOp)

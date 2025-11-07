@@ -3,7 +3,7 @@ import { TRPCError } from '@trpc/server';
 
 import { createTRPCRouter, publicProcedure } from '~/server/trpc/trpc.server';
 import { env } from '~/server/env';
-import { fetchJsonOrTRPCThrow } from '~/server/trpc/trpc.router.fetchers';
+import { fetchJsonOrTRPCThrow, TRPCFetcherError } from '~/server/trpc/trpc.router.fetchers';
 import { serverCapitalizeFirstLetter } from '~/server/wire';
 
 import type { T2ICreateImageAsyncStreamOp } from '~/modules/t2i/t2i.server';
@@ -159,6 +159,18 @@ export const llmOpenAIRouter = createTRPCRouter({
   listModels: publicProcedure
     .input(listModelsInputSchema)
     .output(ListModelsResponse_schema)
+
+    // tRPC middleware: log errors for this procedure - as we don't have proper try/catch blocks yet
+    .use(async ({ next, path, signal, type, input }) => {
+      const result = await next();
+      if (!result.ok && result.error) {
+        // '401 unauthorized' is expected with wrong/missing API keys - log instead of warn
+        const is401 = result.error instanceof TRPCFetcherError && result.error.httpStatus === 401;
+        console[is401 ? 'log' : 'warn'](`${path} (${input.access?.dialect || '?'}):${signal?.aborted ? ' [ABORTED]' : ''}`, result.error);
+      }
+      return result;
+    })
+
     .query(async ({ input: { access }, signal }): Promise<{ models: ModelDescriptionSchema[] }> => {
 
       let models: ModelDescriptionSchema[];
@@ -542,7 +554,7 @@ export function openAIAccess(access: OpenAIAccessSchema, modelRefId: string | nu
       alibabaOaiKey = getRandomKeyFromMultiKey(alibabaOaiKey);
 
       if (!alibabaOaiKey || !alibabaOaiHost)
-        throw new Error('Missing Alibaba API Key. Add it on the UI or server side (your deployment).');
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Missing Alibaba API Key. Add it on the UI or server side (your deployment).' });
 
       return {
         headers: {
@@ -567,7 +579,7 @@ export function openAIAccess(access: OpenAIAccessSchema, modelRefId: string | nu
       deepseekKey = getRandomKeyFromMultiKey(deepseekKey);
 
       if (!deepseekKey || !deepseekHost)
-        throw new Error('Missing Deepseek API Key or Host. Add it on the UI (Models Setup) or server side (your deployment).');
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Missing Deepseek API Key or Host. Add it on the UI (Models Setup) or server side (your deployment).' });
 
       return {
         headers: {
@@ -585,7 +597,7 @@ export function openAIAccess(access: OpenAIAccessSchema, modelRefId: string | nu
       let oaiHost = fixupHost(access.oaiHost || env.OPENAI_API_HOST || DEFAULT_OPENAI_HOST, apiPath);
       // warn if no key - only for default (non-overridden) hosts
       if (!oaiKey && oaiHost.indexOf(DEFAULT_OPENAI_HOST) !== -1)
-        throw new Error('Missing OpenAI API Key. Add it on the UI or server side (your deployment).');
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Missing OpenAI API Key. Add it on the UI or server side (your deployment).' });
 
       // [Helicone]
       // We don't change the host (as we do on Anthropic's), as we expect the user to have a custom host.
@@ -607,11 +619,11 @@ export function openAIAccess(access: OpenAIAccessSchema, modelRefId: string | nu
 
         // The expected path should be: /v1/<ACCOUNT_TAG>/<GATEWAY_URL_SLUG>/<PROVIDER_ENDPOINT>
         if (pathSegments.length < 3 || pathSegments.length > 4 || pathSegments[0] !== 'v1')
-          throw new Error('Cloudflare AI Gateway API Host is not valid. Please check the API Host field in the Models Setup page.');
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cloudflare AI Gateway API Host is not valid. Please check the API Host field in the Models Setup page.' });
 
         const [_v1, accountTag, gatewayName, provider] = pathSegments;
         if (provider && provider !== 'openai')
-          throw new Error('Cloudflare AI Gateway only supports OpenAI as a provider.');
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cloudflare AI Gateway only supports OpenAI as a provider.' });
 
         if (apiPath.startsWith('/v1'))
           apiPath = apiPath.replace('/v1', '');
@@ -638,7 +650,7 @@ export function openAIAccess(access: OpenAIAccessSchema, modelRefId: string | nu
       groqKey = getRandomKeyFromMultiKey(groqKey);
 
       if (!groqKey)
-        throw new Error('Missing Groq API Key. Add it on the UI (Models Setup) or server side (your deployment).');
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Missing Groq API Key. Add it on the UI (Models Setup) or server side (your deployment).' });
 
       return {
         headers: {
@@ -683,7 +695,7 @@ export function openAIAccess(access: OpenAIAccessSchema, modelRefId: string | nu
     case 'openpipe':
       const openPipeKey = access.oaiKey || env.OPENPIPE_API_KEY || '';
       if (!openPipeKey)
-        throw new Error('Missing OpenPipe API Key or Host. Add it on the UI or server side (your deployment).');
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Missing OpenPipe API Key or Host. Add it on the UI or server side (your deployment).' });
 
       return {
         headers: {
@@ -703,7 +715,7 @@ export function openAIAccess(access: OpenAIAccessSchema, modelRefId: string | nu
       orKey = getRandomKeyFromMultiKey(orKey);
 
       if (!orKey || !orHost)
-        throw new Error('Missing OpenRouter API Key or Host. Add it on the UI or server side (your deployment).');
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Missing OpenRouter API Key or Host. Add it on the UI or server side (your deployment).' });
 
       return {
         headers: {
@@ -723,7 +735,7 @@ export function openAIAccess(access: OpenAIAccessSchema, modelRefId: string | nu
       perplexityKey = getRandomKeyFromMultiKey(perplexityKey);
 
       if (!perplexityKey || !perplexityHost)
-        throw new Error('Missing Perplexity API Key or Host. Add it on the UI (Models Setup) or server side (your deployment).');
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Missing Perplexity API Key or Host. Add it on the UI (Models Setup) or server side (your deployment).' });
 
       if (apiPath.startsWith('/v1'))
         apiPath = apiPath.replace('/v1', '');
@@ -746,7 +758,7 @@ export function openAIAccess(access: OpenAIAccessSchema, modelRefId: string | nu
       togetherKey = getRandomKeyFromMultiKey(togetherKey);
 
       if (!togetherKey || !togetherHost)
-        throw new Error('Missing TogetherAI API Key or Host. Add it on the UI (Models Setup) or server side (your deployment).');
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Missing TogetherAI API Key or Host. Add it on the UI (Models Setup) or server side (your deployment).' });
 
       return {
         headers: {
@@ -765,7 +777,8 @@ export function openAIAccess(access: OpenAIAccessSchema, modelRefId: string | nu
       xaiKey = getRandomKeyFromMultiKey(xaiKey);
 
       if (!xaiKey)
-        throw new Error('Missing xAI API Key. Add it on the UI (Models Setup) or server side (your deployment).');
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Missing xAI API Key. Add it on the UI (Models Setup) or server side (your deployment).' });
+
       return {
         headers: {
           'Content-Type': 'application/json',

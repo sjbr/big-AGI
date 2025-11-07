@@ -141,12 +141,66 @@ export function aixToAnthropicMessageCreate(model: AixAPI_Model, _chatGenerate: 
   // --- Tools ---
 
   // Allow/deny auto-adding hosted tools when custom tools are present
-  // const hasCustomTools = chatGenerate.tools?.some(t => t.type === 'function_call');
-  // const hasRestrictivePolicy = chatGenerate.toolsPolicy?.type === 'any' || chatGenerate.toolsPolicy?.type === 'function_call';
-  // const skipHostedToolsDueToCustomTools = hasCustomTools && hasRestrictivePolicy;
+  const hasCustomTools = chatGenerate.tools?.some(t => t.type === 'function_call');
+  const hasRestrictivePolicy = chatGenerate.toolsPolicy?.type === 'any' || chatGenerate.toolsPolicy?.type === 'function_call';
+  const skipHostedToolsDueToCustomTools = hasCustomTools && hasRestrictivePolicy;
 
   // Hosted tools
-  // ...
+  if (!skipHostedToolsDueToCustomTools) {
+    const hostedTools: NonNullable<TRequest['tools']> = [];
+
+    // Web Search Tool
+    if (model.vndAntWebSearch === 'auto') {
+      hostedTools.push({
+        type: 'web_search_20250305',
+        name: 'web_search',
+        max_uses: 10, // Allow up to 10 progressive searches // FIXME: HARDCODED
+      });
+    }
+
+    // Web Fetch Tool
+    if (model.vndAntWebFetch === 'auto') {
+      hostedTools.push({
+        type: 'web_fetch_20250910',
+        name: 'web_fetch',
+        max_uses: 5, // Allow up to 5 fetches
+        citations: { enabled: true }, // Enable citations
+      });
+    }
+
+    // Merge hosted tools with custom tools
+    if (hostedTools.length > 0) {
+      payload.tools = payload.tools ? [...payload.tools, ...hostedTools] : hostedTools;
+    }
+  }
+
+  // --- Skills Container ---
+
+  // Add Skills container if enabled (non-empty string)
+  if (model.vndAntSkills) {
+
+    // Parse comma-separated string and convert to Anthropic format
+    const skillIds = model.vndAntSkills.split(',').map((s: string) => s.trim()).filter((s: string) => s);
+
+    if (skillIds.length > 0) {
+
+      // request a container with those selected skills
+      payload.container = {
+        skills: skillIds.map((skillId: string) => ({
+          type: 'anthropic' as const,
+          skill_id: skillId,
+          version: 'latest',
+        })),
+      };
+
+      // also require the code_execution tool (required by Skills)
+      if (!payload.tools?.length)
+        payload.tools = [];
+
+      if (!payload.tools.some(t => t.type === 'code_execution_20250825'))
+        payload.tools.push({ type: 'code_execution_20250825', name: 'code_execution' });
+    }
+  }
 
 
   // Preemptive error detection with server-side payload validation before sending it upstream
@@ -318,27 +372,6 @@ function _toAnthropicTools(itds: AixTools_ToolDefinition[]): NonNullable<TReques
 
       case 'code_execution':
         throw new Error('Gemini code interpreter is not supported');
-
-      case 'vnd.ant.tools.computer_20241022':
-        return {
-          type: 'computer_20241022',
-          name: 'computer',
-          display_width_px: itd.display_width,
-          display_height_px: itd.display_height,
-          ...(itd.display_number !== undefined && { display_number: itd.display_number }),
-        };
-
-      case 'vnd.ant.tools.text_editor_20241022':
-        return {
-          type: 'text_editor_20241022',
-          name: 'str_replace_editor',
-        };
-
-      case 'vnd.ant.tools.bash_20241022':
-        return {
-          type: 'bash_20241022',
-          name: 'bash',
-        };
 
     }
   });

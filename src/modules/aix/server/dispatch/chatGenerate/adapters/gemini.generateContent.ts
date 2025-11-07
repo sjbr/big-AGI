@@ -146,6 +146,23 @@ export function aixToGeminiGenerateContent(model: AixAPI_Model, _chatGenerate: A
   }
 
   // Hosted tools
+  // [Gemini, 2025-11-01] Computer Use: add tool when environment is specified
+  if (model.vndGeminiComputerUse && !skipHostedToolsDueToCustomTools) {
+    // Initialize tools array if not present
+    if (!payload.tools)
+      payload.tools = [];
+
+    // Build the Computer Use tool configuration
+    const computerUseTool: NonNullable<TRequest['tools']>[number] = {
+      computerUse: {
+        environment: model.vndGeminiComputerUse === 'browser' ? 'ENVIRONMENT_BROWSER' : 'ENVIRONMENT_BROWSER',
+      },
+    };
+
+    // Add to tools array
+    payload.tools.push(computerUseTool);
+  }
+
   // [Gemini, 2025-10-13] Google Search Grounding: add tool when enabled
   if (model.vndGeminiGoogleSearch && !skipHostedToolsDueToCustomTools) {
     // Initialize tools array if not present
@@ -367,9 +384,6 @@ function _toGeminiTools(itds: AixTools_ToolDefinition[]): NonNullable<TRequest['
         });
         break;
 
-      case 'vnd.ant.tools.bash_20241022':
-      case 'vnd.ant.tools.computer_20241022':
-      case 'vnd.ant.tools.text_editor_20241022':
       default: // Note: Gemini's tool function doesn't break on unknown tools, so we need the default case here
         throw new Error('Tool ${itd.type} is not supported by Gemini');
 

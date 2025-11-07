@@ -353,6 +353,16 @@ export namespace OpenAIWire_API_Chat_Completions {
       }).nullable().optional(),
     }).optional(),
 
+    // -- Vendor-specific extensions to the request --
+
+    // [OpenRouter, 2025-10-22] OpenRouter-specific plugins parameter for web search and other hosted tools
+    plugins: z.array(z.object({
+      id: z.literal('web'), // plugin identifier, e.g., 'web
+      engine: z.enum(['native', 'exa']).optional(), // search engine: 'native', 'exa', or undefined (auto)
+      max_results: z.number().int().positive().optional(), // defaults to 5
+      search_prompt: z.string().optional(), // custom search prompt
+    })).optional(),
+
     // [Perplexity, 2025-06-23] Perplexity-specific search parameters
     search_mode: z.enum(['academic']).optional(), // Academic filter for scholarly sources
     search_after_date_filter: z.string().optional(), // Date filter in MM/DD/YYYY format
@@ -418,6 +428,7 @@ export namespace OpenAIWire_API_Chat_Completions {
       reasoning_tokens: z.number().optional(), // [Discord, 2024-04-10] reported missing
       // text_tokens: z.number().optional(), // [Discord, 2024-04-10] revealed as present on custom OpenAI endpoint - not using it here yet
       audio_tokens: z.number().optional(), // [OpenAI, 2024-10-01] audio tokens used in the completion (charged at a different rate)
+      // image_tokens: z.number().optional(), // [OpenRouter, 2025-10-22] first seen.. sounds likely?
       accepted_prediction_tokens: z.number().optional(), // [OpenAI, 2024-11-05] Predicted Outputs
       rejected_prediction_tokens: z.number().optional(), // [OpenAI, 2024-11-05] Predicted Outputs
     }).optional() // not present in other APIs yet
@@ -426,6 +437,26 @@ export namespace OpenAIWire_API_Chat_Completions {
     // [DeepSeek, 2024-08-02] context caching on disk
     prompt_cache_hit_tokens: z.number().optional(),
     prompt_cache_miss_tokens: z.number().optional(),
+
+    // [Perplexity, 2025-10-20] cost breakdown (object format)
+    // [OpenRouter, 2025-01-22] cost as direct number
+    cost: z.union([
+      z.number(), // OpenRouter sends cost as a number directly
+      z.looseObject({
+        input_tokens_cost: z.number().optional(),
+        output_tokens_cost: z.number().optional(),
+        request_cost: z.number().optional(),
+        total_cost: z.number().optional(),
+      }),
+    ]).nullish(),
+
+    // [OpenRouter, 2025-10-22] additional usage fields when used with Chutes
+    // is_byok: z.boolean().optional(), // Bring Your Own Key indicator
+    // cost_details: z.object({
+    //   upstream_inference_cost: z.number().optional(),
+    //   upstream_inference_prompt_cost: z.number().optional(),
+    //   upstream_inference_completions_cost: z.number().optional(),
+    // }).optional(),
   }).nullable();
 
   /**
@@ -613,8 +644,14 @@ export namespace OpenAIWire_API_Chat_Completions {
     object: z.enum([
       'chat.completion.chunk',
       'chat.completion', // [Perplexity] sent an email on 2024-07-14 to inform them about the misnomer
+      /**
+       * [Perplexity, 2025-10-20] Undocumented full-response-like message type
+       * - it's a .chunk, delta with delta='', and finish_reason set (to 'stop') and 'usage.costs' set
+       */
+      'chat.completion.done',
       '', // [Azure] bad response: the first packet communicates 'prompt_filter_results'
     ])
+      // .or(z.string()) // [Perplexity, 2025-10-20] future resiliency post perplexity still breaking the openai compatibility
       .optional(), // [FastAPI, 2025-04-24] the FastAPI dialect sadly misses the 'chat.completion.chunk' type
     id: z.string(),
 
@@ -1216,7 +1253,7 @@ export namespace OpenAIWire_Responses_Tools {
   // Hosted tools definitions
 
   const WebSearchTool_schema = z.object({
-    type: z.enum(['web_search_preview', 'web_search_preview_2025_03_11']),
+    type: z.enum(['web_search', 'web_search_preview', 'web_search_preview_2025_03_11']),
     search_context_size: z.enum(['low', 'medium', 'high']).optional(),
     user_location: z.object({
       type: z.literal('approximate'),
@@ -1225,6 +1262,7 @@ export namespace OpenAIWire_Responses_Tools {
       region: z.string().optional(),
       timezone: z.string().optional(),
     }).optional(),
+    external_web_access: z.boolean().optional(),
   });
 
   const ImageGenerationTool_schema = z.object({
@@ -1301,7 +1339,7 @@ export namespace OpenAIWire_Responses_Tools {
     z.object({ // hosted tool
       type: z.enum([
         // 'file_search',
-        'web_search_preview', 'web_search_preview_2025_03_11',
+        'web_search', 'web_search_preview', 'web_search_preview_2025_03_11',
         'image_generation',
         // 'computer_use_preview',
         // 'code_interpreter',

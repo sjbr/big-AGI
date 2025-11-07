@@ -3,7 +3,7 @@ import { serverSideId } from '~/server/trpc/trpc.nanoid';
 
 import type { AixWire_Particles } from '../../api/aix.wiretypes';
 
-import type { IParticleTransmitter } from './IParticleTransmitter';
+import type { IParticleTransmitter } from './parsers/IParticleTransmitter';
 
 
 // configuration
@@ -60,7 +60,7 @@ export class ChatGenerateTransmitter implements IParticleTransmitter {
   private freshMetrics: boolean = false;
 
 
-  constructor(private readonly prettyDialect: string, _throttleTimeMs: number | undefined) {
+  constructor(private readonly prettyDialect: string /*, _throttleTimeMs: number | undefined */) {
     // TODO: implement throttling on a particle basis
 
     // Not really used for now
@@ -127,8 +127,8 @@ export class ChatGenerateTransmitter implements IParticleTransmitter {
     this.setEnded('issue-rpc');
   }
 
-  addDebugRequest(hideSensitiveData: boolean, url: string, headers: HeadersInit, body: object) {
-    const bodyStr = JSON.stringify(body, null, 2);
+  addDebugRequest(hideSensitiveData: boolean, url: string, headers: HeadersInit, body?: object) {
+    const bodyStr = body === undefined ? '' : JSON.stringify(body, null, 2);
 
     // ellipsize large bodies (e.g., many base64 images) to avoid huge debug packets
     let processedBody = bodyStr;
@@ -146,7 +146,7 @@ export class ChatGenerateTransmitter implements IParticleTransmitter {
         url: url,
         headers: hideSensitiveData ? '(hidden sensitive data)' : JSON.stringify(headers, null, 2),
         body: processedBody,
-        bodySize: JSON.stringify(body).length, // actual size, without pretty-printing or truncation
+        bodySize: body === undefined ? 0 : JSON.stringify(body).length, // actual size, without pretty-printing or truncation
       },
     });
   }
@@ -318,8 +318,10 @@ export class ChatGenerateTransmitter implements IParticleTransmitter {
 
   /** Undocumented, internal, as the IPartTransmitter callers will call setDialectTerminatingIssue instead */
   private _addIssue(issueId: AixWire_Particles.CGIssueId, issueText: string, forceLogWarn: boolean) {
-    if (forceLogWarn || ENABLE_EXTRA_DEV_MESSAGES || SERVER_DEBUG_WIRE)
-      console.warn(`Aix.${this.prettyDialect} (${issueId}): ${issueText}`);
+    if (forceLogWarn || ENABLE_EXTRA_DEV_MESSAGES || SERVER_DEBUG_WIRE) {
+      const logLevel = issueId === 'dispatch-fetch' ? 'log' : 'warn';
+      console[logLevel](`Aix.${this.prettyDialect} ${issueId}: ${issueText}`);
+    }
 
     // queue the issue
     this.endMessagePart();
