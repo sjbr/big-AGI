@@ -156,6 +156,15 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
     _fixVndOaiRestoreMarkdown_Inline(payload);
 
 
+  // [OpenRouter] Vendor-specific web search (native or Exa)
+  if (openAIDialect === 'openrouter' && model.vndOrtWebSearch === 'auto')
+    payload.plugins = [...(payload.plugins || []), {
+      id: 'web',
+      // engine is optional - when undefined, OpenRouter uses native for supported models, falls back to Exa
+      // max_results: 5, // could be configurable in the future
+      // search_prompt: undefined, // could be configurable in the future
+    }];
+
   // [xAI] Vendor-specific extensions for Live Search
   if (openAIDialect === 'xai' && model.vndXaiSearchMode && model.vndXaiSearchMode !== 'off') {
     const search_parameters: any = {
@@ -617,11 +626,6 @@ function _toOpenAITools(itds: AixTools_ToolDefinition[]): NonNullable<TRequest['
 
       case 'code_execution':
         throw new Error('Gemini code interpreter is not supported');
-
-      case 'vnd.ant.tools.bash_20241022':
-      case 'vnd.ant.tools.computer_20241022':
-      case 'vnd.ant.tools.text_editor_20241022':
-        throw new Error('Different Vendor Tools are not supported by OpenAI');
 
       default:
         // const _exhaustiveCheck: never = itdType;

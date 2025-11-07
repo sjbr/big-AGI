@@ -44,7 +44,7 @@ const filterLyingModelNames: GeminiWire_API_Models_List.Model['name'][] = [
    - Latest stable     version  gemini-1.0-pro  <model>-<generation>-<variation>
    - Stable versions   gemini-1.0-pro-001       <model>-<generation>-<variation>-<version>
 
-   Gemini capabilities chart (updated 2025-09-29):
+   Gemini capabilities chart (updated 2025-11-01):
    - [table stakes] System instructions
    - JSON Mode, with optional JSON Schema
    - Adjustable Safety Settings
@@ -65,7 +65,7 @@ const geminiExpFree: ModelDescriptionSchema['chatPrice'] = {
 };
 
 
-// Pricing based on https://ai.google.dev/pricing (Sept 29, 2025)
+// Pricing based on https://ai.google.dev/pricing (Nov 1, 2025)
 
 const gemini25ProPricing: ModelDescriptionSchema['chatPrice'] = {
   input: [{ upTo: 200000, price: 1.25 }, { upTo: null, price: 2.50 }],
@@ -237,6 +237,31 @@ const _knownGeminiModels: ({
     interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Vision, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_Reasoning, LLM_IF_GEM_CodeExecution],
     parameterSpecs: [{ paramId: 'llmVndGeminiThinkingBudget' }],
     benchmark: { cbaElo: 1424 },
+  },
+
+  // 2.5 Pro-Based: Gemini Computer Use Preview - Released October 7, 2025
+  // IMPORTANT: This model requires CLIENT-SIDE browser automation implementation
+  // - Big-AGI (web-only) cannot execute Computer Use actions (screenshots, clicks, typing)
+  // - Users must implement external client-side code to:
+  //   1. Capture screenshots and send to model
+  //   2. Receive function_call responses (click_at, type_text_at, etc.)
+  //   3. Execute actions in browser and capture new screenshots
+  //   4. Handle safety_decision fields (require_confirmation → must prompt user per ToS)
+  //   5. Denormalize coordinates from 0-999 grid to actual screen dimensions
+  // - Reference implementation: https://github.com/google/computer-use-preview
+  // - Docs: https://ai.google.dev/gemini-api/docs/computer-use
+  {
+    id: 'models/gemini-2.5-computer-use-preview-10-2025',
+    labelOverride: 'Gemini 2.5 Computer Use Preview 10-2025',
+    isPreview: true,
+    chatPrice: gemini25ProPricing, // Uses same pricing as 2.5 Pro (pricing page doesn't list separately)
+    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Vision, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_Reasoning, LLM_IF_GEM_CodeExecution],
+    parameterSpecs: [
+      { paramId: 'llmVndGeminiThinkingBudget' },
+      { paramId: 'llmVndGeminiComputerUse' }, // Sets environment=ENVIRONMENT_BROWSER in Computer Use tool
+    ],
+    benchmark: undefined, // Computer use model, not benchmarkable on standard tests
+    hidden: true, // Hidden: requires external client-side implementation not available in Big-AGI
   },
 
   // 2.5 Flash-Based: Gemini Robotics-ER 1.5 Preview - Released September 25, 2025
@@ -614,7 +639,7 @@ export function geminiDevCheckForSuperfluousModels_DEV(apiModelIds: string[]): v
     // find editorial models which aren't present in the API response anymore
     const missingModels = expectedModelIds.filter(id => !apiModelIds.includes(id));
     if (missingModels.length > 0)
-      console.warn(`Gemini: superfluous model definitions: [ ${missingModels.join(', ')} ]`);
+      console.log(`[DEV] Gemini: superfluous model definitions: [ ${missingModels.join(', ')} ]`);
 
   }
 
@@ -634,7 +659,7 @@ export function geminiDevCheckForParserMisses_DEV(wireModels: unknown, parsedMod
 
     // ensure wireModels has .models array
     if (!wireModels || !Array.isArray((wireModels as any)?.models)) {
-      console.warn('[DEV] Gemini: wireModels.models is not an array', wireModels);
+      console.log('[DEV] Gemini: wireModels.models is not an array', wireModels);
       return;
     }
 
@@ -642,7 +667,7 @@ export function geminiDevCheckForParserMisses_DEV(wireModels: unknown, parsedMod
     const wireModelsJson = JSON.stringify((wireModels as any).models);
     const parsedModelsJson = JSON.stringify(parsedModels);
     if (wireModelsJson !== parsedModelsJson)
-      console.warn('[DEV] Gemini: wireModels and parsedModels do not match!', wireModelsJson, parsedModelsJson);
+      console.log('[DEV] Gemini: wireModels and parsedModels do not match!', wireModelsJson, parsedModelsJson);
 
   }
 
@@ -752,7 +777,7 @@ export function geminiModelToModelDescription(geminiModel: GeminiWire_API_Models
   const hasChatInterfaces = supportedGenerationMethods.some(iface => geminiChatInterfaces.includes(iface));
   if (!hasChatInterfaces) {
     if (DEV_DEBUG_GEMINI_MODELS)
-      console.warn(`geminiModelToModelDescription: no chat interfaces (${supportedGenerationMethods.join(', ')}) for model ${modelId} (${displayName}) - skipping.`);
+      console.log(`[DEV] geminiModelToModelDescription: no chat interfaces (${supportedGenerationMethods.join(', ')}) for model ${modelId} (${displayName}) - skipping.`);
     return null; // skip models without chat interfaces
   }
 
@@ -760,7 +785,7 @@ export function geminiModelToModelDescription(geminiModel: GeminiWire_API_Models
   // find known manual mapping
   const knownModel = _knownGeminiModels.find(m => m.id === modelId);
   if (!knownModel && DEV_DEBUG_GEMINI_MODELS)
-    console.warn('geminiModelToModelDescription: unknown model', modelId, geminiModel);
+    console.log('[DEV] geminiModelToModelDescription: unknown model', modelId, geminiModel);
 
   // _delete logic removed - models are now physically removed from the list
   // if (knownModel?._delete)

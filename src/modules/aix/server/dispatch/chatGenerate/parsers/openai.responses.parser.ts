@@ -2,7 +2,7 @@ import { safeErrorString } from '~/server/wire';
 
 import type { AixWire_Particles } from '../../../api/aix.wiretypes';
 import type { ChatGenerateParseFunction } from '../chatGenerate.dispatch';
-import type { IParticleTransmitter } from '../IParticleTransmitter';
+import type { IParticleTransmitter } from './IParticleTransmitter';
 import { IssueSymbols } from '../ChatGenerateTransmitter';
 
 import { OpenAIWire_API_Responses } from '../../wiretypes/openai.wiretypes';
@@ -272,6 +272,11 @@ export function createOpenAIResponsesEventParser(): ChatGenerateParseFunction {
         // Implementation NOTE: we won't uproll sequence numbers for partial resumes - we'll just download the full response
         if (event.response.store && event.response.id)
           pt.setUpstreamHandle(event.response.id, 'oai-responses' /*, event.sequence_number - commented, unused for now */);
+
+        // TODO: [FUTURE] Accumulate in DMessage.sessionMetadata:
+        //   pt.setSessionMetadata('openai.response.id', response.id)
+        //   pt.setSessionMetadata('openai.response.expiresAt', response.expires_at)
+        // Request builder will find latest values and enable reconnection/continuation.
 
         // -> TODO: Generation Details:
         //    .created_at, .truncation, .temperature, .top_p, .tool_choice, tool count, text output type

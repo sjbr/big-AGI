@@ -8,7 +8,6 @@ import { ellipsizeMiddle } from '~/common/util/textUtils';
 import { imageBlobTransform } from '~/common/util/imageUtils';
 import { metricsFinishChatGenerateLg, metricsPendChatGenerateLg } from '~/common/stores/metrics/metrics.chatgenerate';
 import { nanoidToUuidV4 } from '~/common/util/idUtils';
-import { presentErrorToHumans } from '~/common/util/errorUtils';
 
 import type { AixWire_Particles } from '../server/api/aix.wiretypes';
 
@@ -16,6 +15,7 @@ import type { AixClientDebugger, AixFrameId } from './debugger/memstore-aix-clie
 import { aixClientDebugger_completeFrame, aixClientDebugger_init, aixClientDebugger_recordParticleReceived, aixClientDebugger_setProfilerMeasurements, aixClientDebugger_setRequest } from './debugger/reassembler-debug';
 
 import { AixChatGenerateContent_LL, DEBUG_PARTICLES } from './aix.client';
+import { aixClassifyReassemblyError } from './aix.client.errors';
 
 
 // configuration
@@ -46,12 +46,12 @@ export class ContentReassembler {
   constructor(
     private readonly accumulator: AixChatGenerateContent_LL,
     private readonly onAccumulatorUpdated?: () => MaybePromise<void>,
-    enableDebugContext?: AixClientDebugger.Context,
+    inspectorContext?: AixClientDebugger.Context,
     private readonly wireAbortSignal?: AbortSignal,
   ) {
 
     // [SUDO] Debugging the request, last-write-wins for the global (displayed in the UI)
-    this.debuggerFrameId = !enableDebugContext ? null : aixClientDebugger_init(enableDebugContext);
+    this.debuggerFrameId = !inspectorContext ? null : aixClientDebugger_init(inspectorContext);
 
   }
 
@@ -148,25 +148,17 @@ export class ContentReassembler {
 
     } catch (error) {
 
-      // ERROR CATCHING - LIKE the _aixChatGenerateContent_LL which doesn't intercept this somehow
-      // NEW METHOD: shows Error Fragments on both Reassembly and Callbacks errors
       //
-      // - we don't stop processing anymore, as the source may still be pumping particles
-      // - we insert an error fragment showing what happened - akin to how _aixChatGenerateContent_LL would do it
+      // Classify and display processing errors (particle/async work failures)
+      //
+      // NOTE: we cannot throw here as we are part of a detached promise chain
+      // READ the `aixClassifyReassemblyError` that explains this in detail
       //
       const showAsBold = !!this.accumulator.fragments.length;
-      const errorText = (presentErrorToHumans(error, showAsBold, true) || 'Unknown error');
-      this._appendReassemblyDevError(`An unexpected issue occurred: ${errorText} Please retry.`, true);
+      const { errorMessage } = aixClassifyReassemblyError(error, showAsBold);
+
+      this._appendReassemblyDevError(errorMessage, true);
       await this.onAccumulatorUpdated?.()?.catch(console.error);
-
-      // FORMER METHOD - the THROW wasn't caught by the caller
-
-      // mark that we've encountered an error to prevent further scheduling
-      // this.hadErrorInWireReassembly = true;
-      // this.wireParticlesBacklog.length = 0; // empty the backlog
-
-      // te-throw to propagate to outer catch blocks
-      // throw error;
 
     } finally {
 
@@ -263,6 +255,9 @@ export class ContentReassembler {
             break;
           case 'issue':
             this.onCGIssue(op);
+            break;
+          case 'retry-reset':
+            this.onRetryReset(op);
             break;
           case 'set-metrics':
             this.onMetrics(op);
@@ -664,6 +659,23 @@ export class ContentReassembler {
     }
     this.accumulator.fragments.push(createErrorContentFragment(issueText));
     this.currentTextFragmentIndex = null;
+  }
+
+  private onRetryReset({ attempt, maxAttempts, delayMs, reason, shallClear }: Extract<AixWire_Particles.ChatGenerateOp, { cg: 'retry-reset' }>): void {
+    // operation-level retry likely requires a wipe
+    if (shallClear) {
+      this.currentTextFragmentIndex = null;
+      this.accumulator.fragments = [];
+      delete this.accumulator.genTokenStopReason;
+      // keep metrics/model/handle intact - may be useful for debugging retries
+
+      // discard any pending particles from the failed attempt
+      this.wireParticlesBacklog.length = 0;
+    }
+
+    // -> ph: show operation-level retry status
+    const retryMessage = `Retrying [${attempt}/${maxAttempts}] in ${Math.round(delayMs / 1000)}s - ${reason}`;
+    this.accumulator.fragments.push(createPlaceholderVoidFragment(retryMessage, 'ec-retry-srv-op'));
   }
 
   private onMetrics({ metrics }: Extract<AixWire_Particles.ChatGenerateOp, { cg: 'set-metrics' }>): void {
