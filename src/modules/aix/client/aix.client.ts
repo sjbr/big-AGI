@@ -1,12 +1,11 @@
 import { findServiceAccessOrThrow } from '~/modules/llms/vendors/vendor.helpers';
 
-import type { DMessage, DMessageGenerator } from '~/common/stores/chat/chat.message';
 import type { MaybePromise } from '~/common/types/useful.types';
 import { DLLM, DLLMId, getLLMPricing, LLM_IF_HOTFIX_NoTemperature, LLM_IF_OAI_Responses, LLM_IF_Outputs_Audio, LLM_IF_Outputs_Image, LLM_IF_Outputs_NoText } from '~/common/stores/llms/llms.types';
+import { DMessage, DMessageGenerator, messageSetGeneratorAIX_AutoLabel } from '~/common/stores/chat/chat.message';
 import { DMetricsChatGenerate_Lg, metricsChatGenerateLgToMd, metricsComputeChatGenerateCostsMd } from '~/common/stores/metrics/metrics.chatgenerate';
 import { DModelParameterValues, getAllModelParameterValues } from '~/common/stores/llms/llms.parameters';
 import { apiStream } from '~/common/util/trpc.client';
-import { capitalizeFirstLetter } from '~/common/util/textUtils';
 import { createErrorContentFragment, DMessageContentFragment, DMessageErrorPart, DMessageVoidFragment, isContentFragment, isErrorPart } from '~/common/stores/chat/chat.fragments';
 import { findLLMOrThrow } from '~/common/stores/llms/store-llms';
 import { getAixInspectorEnabled } from '~/common/stores/store-ui';
@@ -50,6 +49,7 @@ export function aixCreateModelFromLLMOptions(
     llmRef, llmTemperature, llmResponseTokens, llmTopP,
     llmVndAnt1MContext, llmVndAntSkills, llmVndAntThinkingBudget, llmVndAntWebFetch, llmVndAntWebSearch,
     llmVndGeminiAspectRatio, llmVndGeminiComputerUse, llmVndGeminiGoogleSearch, llmVndGeminiShowThoughts, llmVndGeminiThinkingBudget,
+    // llmVndMoonshotWebSearch,
     llmVndOaiReasoningEffort, llmVndOaiReasoningEffort4, llmVndOaiRestoreMarkdown, llmVndOaiVerbosity, llmVndOaiWebSearchContext, llmVndOaiWebSearchGeolocation, llmVndOaiImageGeneration,
     llmVndOrtWebSearch,
     llmVndPerplexityDateFilter, llmVndPerplexitySearchMode,
@@ -110,6 +110,7 @@ export function aixCreateModelFromLLMOptions(
     ...(llmVndGeminiGoogleSearch ? { vndGeminiGoogleSearch: llmVndGeminiGoogleSearch } : {}),
     ...(llmVndGeminiShowThoughts ? { vndGeminiShowThoughts: llmVndGeminiShowThoughts } : {}),
     ...(llmVndGeminiThinkingBudget !== undefined ? { vndGeminiThinkingBudget: llmVndGeminiThinkingBudget } : {}),
+    // ...(llmVndMoonshotWebSearch === 'auto' ? { vndMoonshotWebSearch: 'auto' } : {}),
     ...(llmVndOaiResponsesAPI ? { vndOaiResponsesAPI: true } : {}),
     ...((llmVndOaiReasoningEffort4 || llmVndOaiReasoningEffort) ? { vndOaiReasoningEffort: llmVndOaiReasoningEffort4 || llmVndOaiReasoningEffort } : {}),
     ...(llmVndOaiRestoreMarkdown ? { vndOaiRestoreMarkdown: llmVndOaiRestoreMarkdown } : {}),
@@ -175,10 +176,8 @@ export async function aixChatGenerateContent_DMessage_FromConversation(
 
   let lastDMessage: AixChatGenerateContent_DMessageGuts = {
     fragments: [],
-    generator: {
-      mgt: 'named',
-      name: llmId as any,
-    },
+    // NOTE: short-lived, immediately updated in the first callback. Note that we don't have the vendorId yet, otherwise we'd initialize this as 'aix' here
+    generator: { mgt: 'named', name: llmId },
     pendingIncomplete: true,
   };
 
@@ -296,16 +295,10 @@ export async function aixChatGenerateText_Simple(
   // Variable to store the final text
   const state: AixChatGenerateText_Simple = {
     text: null,
-    generator: {
-      mgt: 'aix',
-      name: llmId,
-      aix: {
-        vId: llm.vId,
-        mId: llm.id,
-      },
-    },
+    generator: { mgt: 'named', name: 'replace-me-ll' },
     isDone: false,
   };
+  messageSetGeneratorAIX_AutoLabel(state, llm.vId, llm.id);
 
   // NO streaming initial notification - only notified past the first real characters
   // await onTextStreamUpdate?.(dText.text, false);
@@ -469,18 +462,13 @@ export async function aixChatGenerateContent_DMessage_orThrow<TServiceSettings e
   // Aix Low-Level Chat Generation
   const dMessage: AixChatGenerateContent_DMessageGuts = {
     fragments: [],
-    generator: {
-      mgt: 'aix',
-      name: llmId,
-      aix: {
-        vId: llm.vId,
-        mId: llm.id, // NOTE: using llm.id instead of aixModel.id (the ref) so we can re-select them in the UI (Beam)
-      },
-      // metrics: undefined,
-      // tokenStopReason: undefined,
-    },
+    generator: { mgt: 'named', name: 'replace-me-ll' /* metrics: undefined, tokenStopReason: undefined */ },
     pendingIncomplete: true,
   };
+  // Note on the Generator. Besides the simple set below:
+  // - it will get replaced once, and then it's the same from that point on
+  // - using llm.id instead of aixModel.id (the ref) so we can re-select them in the UI (Beam)
+  messageSetGeneratorAIX_AutoLabel(dMessage, llm.vId, llm.id);
 
   // streaming initial notification, for UI updates
   await onStreamingUpdate?.(dMessage, false);
@@ -646,7 +634,9 @@ async function _aixChatGenerateContent_LL(
 
 
   // Retry/Reconnect - low-level state machine
-  const rsm = new AixStreamRetry(0, 0);
+  // - reconnect: for server overload/busy (429, 503, 502) and transient errors
+  // - resume: for network disconnects with OpenAI Responses API handle
+  const rsm = new AixStreamRetry(0, 0); // sensible: 3, 2
 
   while (true) {
 
@@ -747,7 +737,7 @@ async function _aixChatGenerateContent_LL(
 
         // fragment-notify of our ongoing retry attempt
         try {
-          await reassembler.setClientExcepted(`**${capitalizeFirstLetter(shallRetry.strategy)}** (attempt ${shallRetry.attemptNumber}) in ${Math.round(shallRetry.delayMs / 1000)}s: ${errorMessage}`);
+          await reassembler.setClientRetrying(shallRetry.strategy, errorMessage, shallRetry.attemptNumber, 0, shallRetry.delayMs, typeof maybeErrorStatusCode === 'number' ? maybeErrorStatusCode : undefined, errorType);
           await onGenerateContentUpdate?.(accumulator_LL, false /* partial */);
         } catch (e) {
           // .. ignore the notification error
