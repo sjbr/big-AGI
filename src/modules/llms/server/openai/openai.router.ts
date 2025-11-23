@@ -2,7 +2,7 @@ import * as z from 'zod/v4';
 import { TRPCError } from '@trpc/server';
 
 import { createTRPCRouter, publicProcedure } from '~/server/trpc/trpc.server';
-import { env } from '~/server/env';
+import { env } from '~/server/env.server';
 import { fetchJsonOrTRPCThrow, TRPCFetcherError } from '~/server/trpc/trpc.router.fetchers';
 import { serverCapitalizeFirstLetter } from '~/server/wire';
 
@@ -362,7 +362,7 @@ export const llmOpenAIRouter = createTRPCRouter({
     .input(listModelsInputSchema)
     .query(async ({ input: { access } }) => {
       const wireLocalAIModelsAvailable = await openaiGETOrThrow(access, '/models/available');
-      return wireLocalAIModelsAvailableOutputSchema.parse(wireLocalAIModelsAvailable);
+      return wireLocalAIModelsAvailableOutputSchema.parse(wireLocalAIModelsAvailable).filter(model => !!model.name);
     }),
 
   /* [LocalAI] Download a model from a Model Gallery */

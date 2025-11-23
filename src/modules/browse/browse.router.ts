@@ -6,7 +6,7 @@ import { default as TurndownService } from 'turndown';
 import { load as cheerioLoad } from 'cheerio';
 
 import { createTRPCRouter, publicProcedure } from '~/server/trpc/trpc.server';
-import { env } from '~/server/env';
+import { env } from '~/server/env.server';
 
 import { workerPuppeteerDownloadFileOrThrow } from './browse.files';
 
@@ -148,7 +148,7 @@ async function workerPuppeteer(
     // Add default options for better stability
     // defaultViewport: { width: 1024, height: 768 },
     // acceptInsecureCerts: true,
-    protocolTimeout: WORKER_TIMEOUT,
+    protocolTimeout: WORKER_TIMEOUT + 2000, // 2s extra for taking the screenshot?
   });
 
   // for local testing, open an incognito context, to separate cookies
