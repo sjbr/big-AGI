@@ -466,13 +466,15 @@ export namespace AixWire_API {
     vndGeminiMediaResolution: z.enum(['mr_high', 'mr_medium', 'mr_low']).optional(),
     vndGeminiShowThoughts: z.boolean().optional(),
     vndGeminiThinkingBudget: z.number().optional(), // old param
+    // 'medium' will be added when Gemini 3 Flash launches
+    // but we have it below, because we used to have it and we don't want to throw on zod
     vndGeminiThinkingLevel: z.enum(['high', 'medium', 'low']).optional(), // new param
     vndGeminiUrlContext: z.enum(['auto']).optional(),
     // Moonshot
     vndMoonshotWebSearch: z.enum(['auto']).optional(),
     // OpenAI
     vndOaiResponsesAPI: z.boolean().optional(),
-    vndOaiReasoningEffort: z.enum(['minimal', 'low', 'medium', 'high']).optional(),
+    vndOaiReasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
     vndOaiRestoreMarkdown: z.boolean().optional(),
     vndOaiVerbosity: z.enum(['low', 'medium', 'high']).optional(),
     vndOaiWebSearchContext: z.enum(['low', 'medium', 'high']).optional(),

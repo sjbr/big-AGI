@@ -208,7 +208,8 @@ export const DModelParameterRegistry = {
     label: 'Thinking Level',
     type: 'enum' as const,
     description: 'Controls internal reasoning depth. Replaces thinking_budget for Gemini 3 models. When unset, the model decides dynamically.',
-    values: ['high', 'medium' /* not present at launch */, 'low' /* default when unset */] as const,
+    // Note: 'medium' and 'minimal' will be available when Gemini 3 Flash launches
+    values: ['high', 'low' /* default when unset */] as const,
     // No initialValue - undefined means 'dynamic', which for Gemini Pro is the same as 'high' (which is the equivalent of 'medium' for OpenAI's effort levels.. somehow)
   } as const,
 
@@ -247,6 +248,23 @@ export const DModelParameterRegistry = {
     description: 'Constrains effort on reasoning for OpenAI advanced reasoning models',
     values: ['minimal', 'low', 'medium', 'high'] as const,
     requiredFallback: 'medium',
+  } as const,
+
+  llmVndOaiReasoningEffort52: {
+    label: 'Reasoning Effort',
+    type: 'enum' as const,
+    description: 'Constrains effort on reasoning for GPT-5.2 models. When unset, defaults to none (fast responses).',
+    values: ['none', 'low', 'medium', 'high', 'xhigh'] as const,
+    // No requiredFallback - unset = none (the default for GPT-5.2)
+    // No initialValue - starts undefined, which the UI should display as "none"
+  } as const,
+
+  llmVndOaiReasoningEffort52Pro: {
+    label: 'Reasoning Effort',
+    type: 'enum' as const,
+    description: 'Constrains effort on reasoning for GPT-5.2 Pro. Defaults to medium.',
+    values: ['medium', 'high', 'xhigh'] as const,
+    // No requiredFallback - unset = medium (the default for GPT-5.2 Pro)
   } as const,
 
   llmVndOaiRestoreMarkdown: {
