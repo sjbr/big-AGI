@@ -11,7 +11,7 @@ import type { ModelDescriptionSchema } from './llm.server.types';
 
 // protocol: Anthropic
 import { AnthropicWire_API_Models_List, hardcodedAnthropicModels, hardcodedAnthropicVariants, llmsAntCreatePlaceholderModel, llmsAntDevCheckForObsoletedModels_DEV, llmsAntInjectWebSearchInterface } from './anthropic/anthropic.models';
-import { anthropicAccess } from './anthropic/anthropic.access';
+import { ANTHROPIC_API_PATHS, anthropicAccess } from './anthropic/anthropic.access';
 
 // protocol: Gemini
 import { GeminiWire_API_Models_List } from '~/modules/aix/server/dispatch/wiretypes/gemini.wiretypes';
@@ -25,7 +25,7 @@ import { wireOllamaListModelsSchema, wireOllamaModelInfoSchema } from './ollama/
 
 // protocol: OpenAI-compatible
 import type { OpenAIWire_API_Models_List } from '~/modules/aix/server/dispatch/wiretypes/openai.wiretypes';
-import { openAIAccess } from './openai/openai.access';
+import { OPENAI_API_PATHS, openAIAccess } from './openai/openai.access';
 import { alibabaModelFilter, alibabaModelSort, alibabaModelToModelDescription } from './openai/models/alibaba.models';
 import { azureDeploymentFilter, azureDeploymentToModelDescription, azureParseFromDeploymentsAPI } from './openai/models/azure.models';
 import { chutesAIHeuristic, chutesAIModelsToModelDescriptions } from './openai/models/chutesai.models';
@@ -33,6 +33,7 @@ import { deepseekModelFilter, deepseekModelSort, deepseekModelToModelDescription
 import { fastAPIHeuristic, fastAPIModels } from './openai/models/fastapi.models';
 import { fireworksAIHeuristic, fireworksAIModelsToModelDescriptions } from './openai/models/fireworksai.models';
 import { groqModelFilter, groqModelSortFn, groqModelToModelDescription } from './openai/models/groq.models';
+import { novitaHeuristic, novitaModelsToModelDescriptions } from './openai/models/novita.models';
 import { lmStudioModelToModelDescription } from './openai/models/lmstudio.models';
 import { localAIModelSortFn, localAIModelToModelDescription } from './openai/models/localai.models';
 import { mistralModels } from './openai/models/mistral.models';
@@ -90,7 +91,7 @@ function _listModelsCreateDispatch(access: AixAPI_Access, signal?: AbortSignal):
     case 'anthropic': {
       return createDispatch({
         fetchModels: async () => {
-          const { headers, url } = anthropicAccess(access, '/v1/models?limit=1000', {/* ... no options for list ... */ });
+          const { headers, url } = anthropicAccess(access, `${ANTHROPIC_API_PATHS.models}?limit=1000`, {/* ... no options for list ... */ });
           const wireModels = await fetchJsonOrTRPCThrow({ url, headers, name: 'Anthropic', signal });
           return AnthropicWire_API_Models_List.Response_schema.parse(wireModels);
         },
@@ -303,9 +304,9 @@ function _listModelsCreateDispatch(access: AixAPI_Access, signal?: AbortSignal):
     case 'togetherai':
       return createDispatch({
 
-        // [OpenAI-compatible dialects]: fetch openAI-style /v1/models API
+        // [OpenAI-compatible dialects]: openAI-style fetch models list
         fetchModels: async () => {
-          const { headers, url } = openAIAccess(access, null, '/v1/models');
+          const { headers, url } = openAIAccess(access, null, OPENAI_API_PATHS.models);
           return fetchJsonOrTRPCThrow<OpenAIWire_API_Models_List.Response>({ url, headers, name: `OpenAI/${_capitalize(dialect)}`, signal });
         },
 
@@ -384,6 +385,10 @@ function _listModelsCreateDispatch(access: AixAPI_Access, signal?: AbortSignal):
               // [FireworksAI] special case for model enumeration
               if (fireworksAIHeuristic(oaiHost))
                 return fireworksAIModelsToModelDescriptions(maybeModels);
+
+              // [Novita] special case for model enumeration
+              if (novitaHeuristic(oaiHost))
+                return novitaModelsToModelDescriptions(openAIWireModelsResponse);
 
               // [FastChat] make the best of the little info
               if (fastAPIHeuristic(maybeModels))
