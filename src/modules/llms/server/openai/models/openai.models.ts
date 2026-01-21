@@ -108,6 +108,7 @@ export const _knownOpenAIChatModels: ManualMappings = [
     interfaces: [LLM_IF_OAI_Responses, ...IFS_CHAT_CACHE, LLM_IF_Tools_WebSearch, LLM_IF_HOTFIX_NoTemperature],
     parameterSpecs: [
       { paramId: 'llmVndOaiWebSearchContext' },
+      // { paramId: 'llmVndOaiVerbosity' }, // 2026-01-20: still unsupported
       { paramId: 'llmVndOaiImageGeneration' },
     ],
     chatPrice: { input: 1.75, cache: { cType: 'oai-ac', read: 0.175 }, output: 14 },
@@ -175,13 +176,11 @@ export const _knownOpenAIChatModels: ManualMappings = [
     // trainingDataCutoff: 'Oct 31, 2024',
     // interfaces: [LLM_IF_OAI_Responses, LLM_IF_OAI_Chat, LLM_IF_OAI_Vision, LLM_IF_OAI_PromptCaching], // no function calling or reasoning
     interfaces: [LLM_IF_OAI_Responses, ...IFS_CHAT_CACHE_REASON, LLM_IF_Tools_WebSearch, LLM_IF_HOTFIX_NoTemperature],
-    // parameterSpecs: [
-    //   { paramId: 'llmVndOaiReasoningEffort4' }, { paramId: 'llmVndOaiWebSearchContext' },
-    //   { paramId: 'llmVndOaiRestoreMarkdown' },
-    //   { paramId: 'llmVndOaiVerbosity' },
-    //   { paramId: 'llmVndOaiImageGeneration' },
-    //   { paramId: 'llmForceNoStream' },
-    // ],
+    parameterSpecs: [
+      { paramId: 'llmVndOaiWebSearchContext' },
+      // { paramId: 'llmVndOaiVerbosity' }, // 2026-01-20: still unsupported
+      { paramId: 'llmVndOaiImageGeneration' },
+    ],
     chatPrice: { input: 1.25, cache: { cType: 'oai-ac', read: 0.125 }, output: 10 }, // TODO: Update with official pricing when available - this is `gpt-5-chat-latest` pricing
     // benchmark: TBD
   },
@@ -371,6 +370,22 @@ export const _knownOpenAIChatModels: ManualMappings = [
     label: 'GPT-5 Nano',
     symLink: 'gpt-5-nano-2025-08-07',
   },
+
+  /// OSB-120b - Speculative support for new model appearing in API
+  {
+    idPrefix: 'osb-120b',
+    label: 'OSB-120B',
+    description: 'Speculative support for osb-120b model. Uses Responses API.',
+    contextWindow: 128000,
+    maxCompletionTokens: 32768,
+    interfaces: [LLM_IF_OAI_Responses, ...IFS_CHAT_CACHE_REASON, LLM_IF_HOTFIX_NoTemperature],
+    parameterSpecs: [
+      { paramId: 'llmVndOaiReasoningEffort' },
+      { paramId: 'llmForceNoStream' },
+    ],
+    // chatPrice: TBD - unknown pricing
+  },
+
 
   /// [OpenAI, 2025-03-11] NEW `v1/responses` API MODELS - UNSUPPORTED YET
 
@@ -951,7 +966,7 @@ export const _fallbackOpenAIModel: KnownModel = {
   description: 'Unknown, please let us know the ID. Assuming a context window of 128k tokens, and a maximum output of 4k tokens.',
   contextWindow: 128000,
   maxCompletionTokens: 4096,
-  interfaces: IFS_CHAT_MIN,
+  interfaces: [...IFS_CHAT_MIN, LLM_IF_OAI_Responses], // Use Responses API by default for new models
   // hidden: true,
 };
 
@@ -1037,6 +1052,8 @@ const _manualOrderingIdPrefixes = [
   'gpt-5-chat-latest',
   'gpt-5-codex',
   'gpt-5-',
+  // OSB models?
+  'osb-',
   // Reasoning models
   'o5-20',
   'o5-mini-20',

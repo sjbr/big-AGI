@@ -108,8 +108,8 @@ export namespace OpenAIWire_ContentParts {
     }),
   });
 
-  // [OpenRouter, 2025-11-11] Reasoning details - structured reasoning output
-  // https://openrouter.ai/docs/use-cases/reasoning-tokens#reasoning-detail-types
+  // [OpenRouter, 2025-01-20] Reasoning details - structured reasoning output
+  // https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#reasoning-detail-types
   export const OpenRouter_ReasoningDetail_schema = z.object({
     type: z.union([
       z.enum(['reasoning.summary', 'reasoning.text', 'reasoning.encrypted']),
@@ -117,7 +117,17 @@ export namespace OpenAIWire_ContentParts {
     ]),
     text: z.string().optional(), // Actual reasoning text (for 'text' type)
     summary: z.string().optional(), // Summary of reasoning (for 'summary' type)
-    // 'encrypted' type has no additional fields - indicates reasoning happened but not returned
+    // we don't use these for now:
+    // signature: z.string().nullable().optional(), // Signature verification (for 'text' type)
+    // // 'encrypted' type has 'data' field - indicates reasoning happened but not returned
+    // data: z.string().optional(), // Encrypted reasoning data (for 'encrypted' type)
+    // // Common metadata fields
+    // id: z.string().nullable().optional(), // Unique identifier for the reasoning detail
+    // format: z.union([
+    //   z.enum(['unknown', 'openai-responses-v1', 'xai-responses-v1', 'anthropic-claude-v1']),
+    //   z.string(),
+    // ]).optional(), // Format of the reasoning detail
+    // index: z.number().optional(), // Sequential index of the reasoning detail
   });
 
 }
@@ -176,7 +186,7 @@ export namespace OpenAIWire_Messages {
       id: z.string(),
     }).nullable().optional(),
 
-    /** [OpenRouter, 2025-11-11] Reasoning traces with multiple blocks (summary, text, encrypted). */
+    /** [OpenRouter, 2025-01-20] Reasoning traces with multiple blocks (summary, text, encrypted). */
     reasoning_details: z.array(OpenAIWire_ContentParts.OpenRouter_ReasoningDetail_schema).optional(),
 
     // function_call: // ignored, as it's deprecated
@@ -324,8 +334,8 @@ export namespace OpenAIWire_API_Chat_Completions {
     reasoning_effort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']).optional(), // [OpenAI, 2024-12-17] [Perplexity, 2025-06-23] reasoning effort
     // [OpenRouter, 2025-11-11] Unified reasoning parameter for all models
     reasoning: z.object({
-      max_tokens: z.number().int().positive().optional(), // Token-based control (Anthropic, Gemini): 1024-32000
-      effort: z.enum(['none', 'low', 'medium', 'high', 'xhigh']).optional(), // Effort-based control (OpenAI o1/o3/GPT-5, DeepSeek): allocates % of max_tokens
+      max_tokens: z.int().optional(), // Token-based control (Anthropic, Gemini): 1024-32000
+      effort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']).optional(), // Effort-based control (OpenAI o1/o3/GPT-5, xAI, DeepSeek): allocates % of max_tokens
       enabled: z.boolean().optional(), // Simple enable with medium effort defaults
       exclude: z.boolean().optional(), // Use reasoning internally without returning it in response
     }).optional(),
@@ -395,6 +405,10 @@ export namespace OpenAIWire_API_Chat_Completions {
       max_results: z.number().int().positive().optional(), // defaults to 5
       search_prompt: z.string().optional(), // custom search prompt
     })).optional(),
+
+    // [OpenRouter, 2025-01-20] Verbosity parameter - maps to output_config.effort for Anthropic models (Claude Opus 4.5)
+    // https://openrouter.ai/docs/api/reference/parameters#verbosity
+    verbosity: z.enum(['low', 'medium', 'high']).optional(),
 
     // [Perplexity, 2025-06-23] Perplexity-specific search parameters
     search_mode: z.enum(['academic']).optional(), // Academic filter for scholarly sources
@@ -656,7 +670,7 @@ export namespace OpenAIWire_API_Chat_Completions {
       }))),
     // delta-reasoning content
     reasoning_content: z.string().nullable().optional(), // [Deepseek, 2025-01-20]
-    // [OpenRouter, 2025-11-11] Reasoning traces
+    // [OpenRouter, 2025-01-20] Reasoning traces
     reasoning_details: z.array(OpenAIWire_ContentParts.OpenRouter_ReasoningDetail_schema).nullish(),
     // delta-tool-calls content
     tool_calls: z.array(ChunkDeltaToolCalls_schema).optional()
@@ -949,49 +963,8 @@ export namespace OpenAIWire_API_Models_List {
 
 
 //
-// Moderations > Create Moderation
-//
-export namespace OpenAIWire_API_Moderations_Create {
-
-  export type Request = z.infer<typeof Request_schema>;
-  const Request_schema = z.object({
-    // input: z.union([z.string(), z.array(z.string())]),
-    input: z.string(),
-    model: z.enum(['text-moderation-stable', 'text-moderation-latest']).optional(),
-  });
-
-  const Category_schema = z.enum([
-    'sexual',
-    'hate',
-    'harassment',
-    'self-harm',
-    'sexual/minors',
-    'hate/threatening',
-    'violence/graphic',
-    'self-harm/intent',
-    'self-harm/instructions',
-    'harassment/threatening',
-    'violence',
-  ]);
-
-  const Result_schema = z.object({
-    flagged: z.boolean(),
-    categories: z.record(Category_schema, z.boolean()),
-    category_scores: z.record(Category_schema, z.number()),
-  });
-
-  export type Response = z.infer<typeof Response_schema>;
-  const Response_schema = z.object({
-    id: z.string(),
-    model: z.string(),
-    results: z.array(Result_schema),
-  });
-
-}
-
-
 // Chat > Responses API
-
+//
 export namespace OpenAIWire_Responses_Items {
 
   // Parts - Input
