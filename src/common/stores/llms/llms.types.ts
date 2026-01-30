@@ -4,7 +4,7 @@
 
 import type { ModelVendorId } from '~/modules/llms/vendors/vendors.registry';
 
-import type { DModelParameterId, DModelParameterSpec, DModelParameterValues } from './llms.parameters';
+import type { DModelParameterSpecAny, DModelParameterValues } from './llms.parameters';
 import type { DModelPricing } from './llms.pricing';
 import type { DModelsServiceId } from './llms.service.types';
 
@@ -21,37 +21,40 @@ export type DLLMId = string;
 export interface DLLM {
   id: DLLMId;
 
-  // editable properties (kept on update, if isEdited)
+  // factory properties (overwritten on update)
   label: string;
   created: number | 0;
   updated?: number | 0;
   description: string;
-  hidden: boolean;                  // default hidden state (can change underlying between refreshes)
+  hidden: boolean;
 
   // hard properties (overwritten on update)
   contextTokens: DLLMContextTokens;     // null: must assume it's unknown
   maxOutputTokens: DLLMMaxOutputTokens; // null: must assume it's unknown
-  trainingDataCutoff?: string;          // 'Apr 2029'
   interfaces: DModelInterfaceV1[];      // if set, meaning this is the known and comprehensive set of interfaces
-  benchmark?: { cbaElo?: number, cbaMmlu?: number }; // benchmark values
+  benchmark?: { cbaElo?: number }; // benchmark values (Chat Bot Arena ELO)
   pricing?: DModelPricing;
 
-  // parameters system
-  parameterSpecs: DModelParameterSpec<DModelParameterId>[];
+  // parameters system (overwritten on update)
+  parameterSpecs: DModelParameterSpecAny[];
   initialParameters: DModelParameterValues;
 
-  // references
-  sId: DModelsServiceId;
-  vId: ModelVendorId;
+  // references (const, never change)
+  sId: DModelsServiceId; // could be weak, but they're removed at the same time
+  vId: ModelVendorId; // known hardcoded value
 
   // user edited properties - if not undefined/missing, they override the others
   userLabel?: string;
   userHidden?: boolean;
   userStarred?: boolean;
-  userParameters?: DModelParameterValues; // user has set these parameters
-  userContextTokens?: DLLMContextTokens;       // user override for context window
-  userMaxOutputTokens?: DLLMMaxOutputTokens;   // user override for max output tokens
-  userPricing?: DModelPricing;                 // user override for model pricing
+  userContextTokens?: DLLMContextTokens;
+  userMaxOutputTokens?: DLLMMaxOutputTokens;
+  userPricing?: DModelPricing;
+  userParameters?: DModelParameterValues;
+
+  // clone metadata - user-created duplicates of models with independent settings
+  isUserClone?: boolean;        // true if this is a user-created clone
+  cloneSourceId?: DLLMId;       // original model ID (for reference)
 }
 
 
@@ -178,7 +181,6 @@ export const LLM_IF_Tools_WebSearch: DModelInterfaceV1 = 'tools-web-search';
 export const LLM_IF_OAI_Complete: DModelInterfaceV1 = 'oai-complete';
 export const LLM_IF_ANT_PromptCaching: DModelInterfaceV1 = 'ant-prompt-caching';
 export const LLM_IF_OAI_PromptCaching: DModelInterfaceV1 = 'oai-prompt-caching';
-export const LLM_IF_OAI_Realtime: DModelInterfaceV1 = 'oai-realtime';
 export const LLM_IF_OAI_Responses: DModelInterfaceV1 = 'oai-responses';
 export const LLM_IF_GEM_CodeExecution: DModelInterfaceV1 = 'gem-code-execution';
 export const LLM_IF_HOTFIX_NoStream: DModelInterfaceV1 = 'hotfix-no-stream';
@@ -206,7 +208,6 @@ export const LLMS_ALL_INTERFACES = [
   LLM_IF_ANT_PromptCaching,   // [Anthropic] model supports anthropic-specific caching
   LLM_IF_GEM_CodeExecution,   // [Gemini] Tool: code execution
   LLM_IF_OAI_PromptCaching,   // [OpenAI] model supports OpenAI prompt caching
-  LLM_IF_OAI_Realtime,        // [OpenAI] realtime API support - unused
   LLM_IF_OAI_Responses,       // [OpenAI] Responses API (new) support
   // Hotfixes to patch specific model quirks
   LLM_IF_HOTFIX_NoStream,     // disable streaming (e.g., o1-preview(old))

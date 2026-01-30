@@ -45,6 +45,10 @@ export async function* executeChatGenerate(
     return; // exit
   }
 
+  // [DEV] Apply a request body override, if set
+  if (_d.requestBodyOverride && 'body' in dispatch.request)
+    dispatch.request.body = { ...dispatch.request.body, ..._d.requestBodyOverride };
+
   // Connect to the dispatch
   const dispatchResponse = yield* _connectToDispatch(dispatch.request, intakeAbortSignal, chatGenerateTx, _d);
   if (!dispatchResponse)
@@ -115,8 +119,8 @@ async function* _connectToDispatch(
     return dispatchResponse;
 
   } catch (error: any) {
-    // Handle expected dispatch abortion while the first fetch hasn't even completed
-    if (error && error?.name === 'TRPCError' && intakeAbortSignal.aborted) {
+    // Handle expected dispatch abortion while the first fetch hasn't even completed - both TRPCError (for RPC conversion) and TRPCFetcherError (for direct fetch)
+    if (error && (error?.name === 'TRPCError' /* tRPC */ || error?.name === 'TRPCFetcherError') && intakeAbortSignal.aborted) {
       chatGenerateTx.setEnded('done-dispatch-aborted');
       yield* chatGenerateTx.flushParticles();
       return null; // signal caller to exit
@@ -151,7 +155,7 @@ async function* _consumeDispatchUnified(
     const fullBodyReadPromise = dispatchResponse.text();
     dispatchBody = yield* heartbeatsWhileAwaiting(fullBodyReadPromise);
     _d.profiler?.measureEnd('read-full');
-    _d.wire?.onMessage(dispatchBody);
+    _d.wire?.logResponse(dispatchBody);
 
     // Parse the response in full
     _d.profiler?.measureStart('parse-full');
@@ -191,6 +195,7 @@ async function* _consumeDispatchStream(
 
     // Stream... -> Events[] (& yield heartbeats)
     let demuxedEvents: AixDemuxers.DemuxedEvent[] = [];
+    let isFinalIteration = false;
     try {
 
       // 1. Blocking read with heartbeats
@@ -201,24 +206,36 @@ async function* _consumeDispatchStream(
 
       // Handle normal dispatch stream closure (no more data, AI Service closed the stream)
       if (done) {
-        chatGenerateTx.setEnded('done-dispatch-closed');
-        break; // outer do {}
+
+        // we used to `chatGenerateTx.setEnded('done-dispatch-closed');` here and break out of the processing loop,
+        // but there may be recoverable events in the demuxer's buffer
+        isFinalIteration = true;
+
+        // 2. Decode nothing new
+
+        // 3. Recover leftover events
+        _d.profiler?.measureStart('demux');
+        demuxedEvents = dispatchDemuxer.flushRemaining();
+        _d.profiler?.measureEnd('demux');
+
+      } else {
+
+        // 2. Decode the chunk - does Not throw (see the constructor for why)
+        _d.profiler?.measureStart('decode');
+        const chunk = dispatchDecoder.decode(value, { stream: true });
+        _d.profiler?.measureEnd('decode');
+
+        // 3. Demux the chunk into 0 or more events
+        _d.profiler?.measureStart('demux');
+        demuxedEvents = dispatchDemuxer.demux(chunk);
+        _d.profiler?.measureEnd('demux');
+
       }
-
-      // 2. Decode the chunk - does Not throw (see the constructor for why)
-      _d.profiler?.measureStart('decode');
-      const chunk = dispatchDecoder.decode(value, { stream: true });
-      _d.profiler?.measureEnd('decode');
-
-      // 3. Demux the chunk into 0 or more events
-      _d.profiler?.measureStart('demux');
-      demuxedEvents = dispatchDemuxer.demux(chunk);
-      _d.profiler?.measureEnd('demux');
 
     } catch (error: any) {
       // Handle expected dispatch stream abortion - nothing to do, as the intake is already closed
       // TODO: check if 'AbortError' is also a cause. Seems like ResponseAborted is NextJS vs signal driven.
-      if (error && error?.name === 'ResponseAborted') {
+      if (error && (error?.name === 'ResponseAborted' /* tRPC */ || error?.name === 'AbortError' /* CSF */)) {
         chatGenerateTx.setEnded('done-dispatch-aborted');
         break; // outer do {}
       }
@@ -230,7 +247,7 @@ async function* _consumeDispatchStream(
 
     // ...Events[] -> parse() -> Particles* -> yield
     for (const demuxedItem of demuxedEvents) {
-      _d.wire?.onMessage(demuxedItem);
+      _d.wire?.logResponse(demuxedItem);
 
       // ignore events post termination
       if (chatGenerateTx.isEnded) {
@@ -270,6 +287,12 @@ async function* _consumeDispatchStream(
         chatGenerateTx.setRpcTerminatingIssue('dispatch-parse', ` **[Service Parsing Issue] ${_d.prettyDialect}**: ${safeErrorString(error) || 'Unknown stream parsing error'}.\n\nInput data: ${objectDeepCloneWithStringLimit(demuxedItem.data, 'aix.service-parsing-issue', 2048)}.\n\nPlease open a support ticket on GitHub.`, 'srv-warn');
         break; // inner for {}, then outer do
       }
+    }
+
+    // 6. Normal stream end - if didn't end in a connection or event parsing error
+    if (isFinalIteration && !chatGenerateTx.isEnded) {
+      chatGenerateTx.setEnded('done-dispatch-closed');
+      break; // outer do {}
     }
 
   } while (!chatGenerateTx.isEnded);
