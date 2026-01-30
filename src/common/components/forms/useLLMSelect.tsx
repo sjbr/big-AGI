@@ -1,7 +1,7 @@
 import * as React from 'react';
 
 import type { SxProps } from '@mui/joy/styles/types';
-import { Box, Chip, ColorPaletteProp, FormControl, IconButton, ListDivider, ListItem, ListItemButton, ListItemDecorator, Option, Select, SelectSlotsAndSlotProps, SvgIconProps, VariantProp, optionClasses } from '@mui/joy';
+import { Chip, ColorPaletteProp, FormControl, IconButton, ListDivider, ListItem, ListItemButton, ListItemDecorator, Option, optionClasses, Select, SelectSlotsAndSlotProps, SvgIconProps, VariantProp } from '@mui/joy';
 import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
 import AutoModeIcon from '@mui/icons-material/AutoMode';
 import BuildCircleIcon from '@mui/icons-material/BuildCircle';
@@ -87,7 +87,7 @@ const _styles = {
   },
 } as const satisfies Record<string, SxProps>;
 
-const _slotProps: SelectSlotsAndSlotProps<false>['slotProps'] = {
+const _slotProps = {
   // see the OptimaBarDropdown.listbox for a well made customization (max-height, max-width, etc.)
   listbox: {
     sx: {
@@ -130,7 +130,7 @@ const _slotProps: SelectSlotsAndSlotProps<false>['slotProps'] = {
       minWidth: '6rem',
     } as const,
   } as const,
-} as const;
+} as const satisfies SelectSlotsAndSlotProps<false>['slotProps'];
 
 
 interface LLMSelectOptions {
@@ -190,6 +190,32 @@ export function useLLMSelect(
   }, []);
 
 
+  // Scroll preservation: MUI's useSelect auto-scrolls to highlighted item when options change - we want to preserve scroll instead
+
+  const listboxRef = React.useRef<HTMLUListElement>(null);
+
+  const listboxSlotPropsStable = React.useMemo(() => ({
+    ..._slotProps,
+    listbox: { ..._slotProps.listbox, ref: listboxRef },
+  }), []);
+
+  React.useLayoutEffect(() => {
+    // restore scroll after collapse/expand - snapshot before MUI scrolls, restore via double RAF
+    const el = listboxRef.current;
+    if (!el) return;
+    const scrollTop = el.scrollTop;
+    const raf = requestAnimationFrame(() => {
+      // usually works, especially on expansion
+      el.scrollTop = scrollTop;
+      return requestAnimationFrame(() => {
+        // fixes the collapse too
+        el.scrollTop = scrollTop;
+      });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [collapsedServices]);
+
+
   // memo LLM Options
 
   const optimizeToSingleVisibleId = (!controlledOpen && _filteredLLMs.length > LLM_SELECT_REDUCE_OPTIONS) ? llmId : null; // id to keep visible when optimizing
@@ -236,6 +262,8 @@ export function useLLMSelect(
       if (isNotSymlink) {
         // check features
         if (seemsFree) features += 'free ';
+        if (llm.isUserClone)
+          features += '➕ '; // is clone
         if (llm.interfaces.includes(LLM_IF_OAI_Reasoning))
           features += '🧠 '; // can reason
         if (llm.interfaces.includes(LLM_IF_Tools_WebSearch))
@@ -278,7 +306,7 @@ export function useLLMSelect(
                 // variant='outlined'
                 onClick={(e) => {
                   e.stopPropagation();
-                  optimaActions().openModelOptions(llm.id);
+                  optimaActions().openModelOptions(llm.id, 'parameters');
                 }}
                 sx={_styles.configButton}
               >
@@ -323,7 +351,7 @@ export function useLLMSelect(
         listboxOpen={controlledOpen}
         onListboxOpenChange={hasNoModels ? optimaOpenModels : setControlledOpen}
         placeholder={hasNoModels ? LLM_TEXT_CONFIGURE : placeholder}
-        slotProps={_slotProps}
+        slotProps={listboxSlotPropsStable}
         endDecorator={autoRefreshDomain ?
           <TooltipOutlined title='Auto-select the model'>
             <IconButton onClick={() => llmsStoreActions().assignDomainModelId(autoRefreshDomain, null)}>
@@ -366,7 +394,7 @@ export function useLLMSelect(
       </Select>
       {/*</Box>*/}
     </FormControl>
-  ), [appendConfigureModels, autoRefreshDomain, controlledOpen, disabled, hasNoModels, hasStarred, isHorizontal, isReasoning, label, larger, llmId, onSelectChange, optimizeToSingleVisibleId, options.color, options.sx, options.variant, optionsArray, placeholder, showNoOptions, showStarFilter, starredOnly]);
+  ), [appendConfigureModels, autoRefreshDomain, controlledOpen, disabled, hasNoModels, hasStarred, isHorizontal, isReasoning, label, larger, listboxSlotPropsStable, llmId, onSelectChange, optimizeToSingleVisibleId, options.color, options.sx, options.variant, optionsArray, placeholder, showNoOptions, showStarFilter, starredOnly]);
 
   // Memo the vendor icon for the chat LLM
   const chatLLMVendorIconFC = React.useMemo(() => {
