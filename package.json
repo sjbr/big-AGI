@@ -12,6 +12,7 @@
     "start": "next start",
     "lint": "next lint",
     "postinstall": "prisma generate --no-hints",
+    "gen:icon-sprites": "node tools/develop/gen-icon-sprites/generate-llm-sprites.ts",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "vercel:env:pull": "npx vercel env pull .env.development.local",
@@ -55,8 +56,8 @@
     "next": "~15.1.12",
     "nprogress": "^0.2.0",
     "pdfjs-dist": "5.4.54",
-    "posthog-js": "^1.336.4",
-    "posthog-node": "^5.24.7",
+    "posthog-js": "^1.341.0",
+    "posthog-node": "^5.24.10",
     "prismjs": "^1.30.0",
     "puppeteer-core": "^24.36.1",
     "react": "^18.3.1",
@@ -80,10 +81,10 @@
   },
   "devDependencies": {
     "@posthog/nextjs-config": "~1.6.4",
-    "@types/node": "^25.1.0",
+    "@types/node": "^25.2.0",
     "@types/nprogress": "^0.2.3",
     "@types/prismjs": "^1.26.5",
-    "@types/react": "^19.2.10",
+    "@types/react": "^19.2.11",
     "@types/react-csv": "^1.1.10",
     "@types/react-dom": "^19.2.3",
     "@types/turndown": "^5.0.6",
@@ -92,9 +93,10 @@
     "eslint-config-next": "~15.1.12",
     "prettier": "^3.8.1",
     "prisma": "~5.22.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
   "engines": {
-    "node": "^26.0.0 || ^24.0.0 || ^22.0.0 || ^20.0.0"
+    "node": "^24.0.0 || ^22.0.0 || ^20.0.0"
   }
 }

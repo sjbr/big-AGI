@@ -300,8 +300,8 @@ export namespace OpenAIWire_API_Chat_Completions {
     parallel_tool_calls: z.boolean().optional(), // defaults to true
 
     // common model configuration
-    max_completion_tokens: z.number().int().positive().optional(), // [OpenAI o1, 2024-09-12]
-    max_tokens: z.number().optional(), // Deprecated in favor of max_completion_tokens - but still used by pre-o1 models and OpenAI-compatible APIs
+    max_completion_tokens: z.number().int().positive().optional(),
+    max_tokens: z.number().optional(), // DEPRECATED
     temperature: z.number().min(0).max(2).optional(),
     top_p: z.number().min(0).max(1).optional(),
 
@@ -332,6 +332,12 @@ export namespace OpenAIWire_API_Chat_Completions {
       include_usage: z.boolean().optional(), // If set, an additional chunk will be streamed with a 'usage' field on the entire request.
     }).optional(),
     reasoning_effort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']).optional(), // [OpenAI, 2024-12-17] [Perplexity, 2025-06-23] reasoning effort
+    // OpenAI and [OpenRouter, 2025-01-20] Verbosity parameter - maps to output_config.effort for Anthropic models
+    // https://openrouter.ai/docs/api/reference/parameters#verbosity
+    verbosity: z.enum([
+      'low', 'medium', 'high',
+      'max', // [OpenRouter, 2026-02-06] Anthropic-through-openrouter has its llmVndAntEffort/llmVndAntEffortMax mapped to 'verbosity'
+    ]).optional(), // 'max' is Opus 4.6 only
     // [OpenRouter, 2025-11-11] Unified reasoning parameter for all models
     reasoning: z.object({
       max_tokens: z.int().optional(), // Token-based control (Anthropic, Gemini): 1024-32000
@@ -399,16 +405,41 @@ export namespace OpenAIWire_API_Chat_Completions {
     // -- Vendor-specific extensions to the request --
 
     // [OpenRouter, 2025-10-22] OpenRouter-specific plugins parameter for web search and other hosted tools
-    plugins: z.array(z.object({
-      id: z.literal('web'), // plugin identifier, e.g., 'web
-      engine: z.enum(['native', 'exa']).optional(), // search engine: 'native', 'exa', or undefined (auto)
-      max_results: z.number().int().positive().optional(), // defaults to 5
-      search_prompt: z.string().optional(), // custom search prompt
-    })).optional(),
+    plugins: z.array(z.union([
+      z.object({
+        id: z.literal('web'),
+        engine: z.enum(['native', 'exa']).optional(), // search engine: 'native', 'exa', or undefined (auto)
+        max_results: z.number().int().positive().optional(), // defaults to 5
+        search_prompt: z.string().optional(), // custom search prompt
+      }),
+      // [OpenRouter, 2026-02-06] Auto-fixes malformed JSON/tool calls from providers - DISABLED for now
+      // z.object({
+      //   id: z.literal('response-healing'),
+      //   enabled: z.boolean().optional(),
+      // }),
+    ])).optional(),
 
-    // [OpenRouter, 2025-01-20] Verbosity parameter - maps to output_config.effort for Anthropic models (Claude Opus 4.5)
-    // https://openrouter.ai/docs/api/reference/parameters#verbosity
-    verbosity: z.enum(['low', 'medium', 'high']).optional(),
+    // [OpenRouter, 2026-02-06] Provider routing preferences
+    provider: z.object({
+      require_parameters: z.boolean().optional(), // Only route to providers supporting all request params (strict mode)
+      allow_fallbacks: z.boolean().optional(), // Whether to allow backup providers (default: true)
+      data_collection: z.enum(['allow', 'deny']).optional(), // 'deny' = only use providers that don't train on user data
+      sort: z.union([
+        z.enum(['price', 'throughput', 'latency']), // Simple sort preference
+        z.object({
+          by: z.enum(['price', 'throughput', 'latency']).optional(),
+          partition: z.enum(['model', 'none']).optional(),
+        }),
+      ]).optional(),
+      order: z.array(z.string()).optional(), // Ordered list of provider slugs to prefer
+      ignore: z.array(z.string()).optional(), // Provider slugs to skip
+      quantizations: z.array(z.enum(['int4', 'int8', 'fp4', 'fp6', 'fp8', 'fp16', 'bf16', 'fp32', 'unknown'])).optional(),
+    }).optional(),
+
+    // [OpenRouter, 2026-02-06] Debug - echoes what OR sent upstream; not wired, use requestBodyOverride to inject ad-hoc
+    debug: z.object({
+      echo_upstream_body: z.boolean().optional(),
+    }).optional(),
 
     // [Perplexity, 2025-06-23] Perplexity-specific search parameters
     search_mode: z.enum(['academic']).optional(), // Academic filter for scholarly sources
@@ -422,6 +453,8 @@ export namespace OpenAIWire_API_Chat_Completions {
     seed: z.number().int().optional(),
     stop: z.array(z.string()).optional(), // Up to 4 sequences where the API will stop generating further tokens.
     user: z.string().optional(),
+    // IGNORING: safety_identifier: z.string().optional(),
+    // IGNORING: prompt_cache_key: z.string().optional(),
 
     // (deprecated upstream, OMITTED BY CHOICE): function_call and functions
 
@@ -477,7 +510,7 @@ export namespace OpenAIWire_API_Chat_Completions {
       reasoning_tokens: z.number().optional(), // [Discord, 2024-04-10] reported missing
       // text_tokens: z.number().optional(), // [Discord, 2024-04-10] revealed as present on custom OpenAI endpoint - not using it here yet
       audio_tokens: z.number().optional(), // [OpenAI, 2024-10-01] audio tokens used in the completion (charged at a different rate)
-      // image_tokens: z.number().optional(), // [OpenRouter, 2025-10-22] first seen.. sounds likely?
+      // image_tokens: z.number().optional(), // [OpenRouter, 2026-02-06] confirmed: image tokens in image generation output
       accepted_prediction_tokens: z.number().optional(), // [OpenAI, 2024-11-05] Predicted Outputs
       rejected_prediction_tokens: z.number().optional(), // [OpenAI, 2024-11-05] Predicted Outputs
     }).optional() // not present in other APIs yet

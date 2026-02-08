@@ -132,17 +132,28 @@ export function aixToAnthropicMessageCreate(model: AixAPI_Model, _chatGenerate: 
     delete payload.temperature;
   }
 
-  // [Anthropic] Thinking Budget
+  // [Anthropic] Thinking: adaptive (4.6+), enabled with budget (≤4.5), or disabled
   const areToolCallsRequired = payload.tool_choice && typeof payload.tool_choice === 'object' && (payload.tool_choice.type === 'any' || payload.tool_choice.type === 'tool');
   const canUseThinking = !areToolCallsRequired || !hotFixDisableThinkingWhenToolsForced;
   if (model.vndAntThinkingBudget !== undefined && canUseThinking) {
-    payload.thinking = model.vndAntThinkingBudget !== null ? {
-      type: 'enabled',
-      budget_tokens: model.vndAntThinkingBudget < payload.max_tokens ? model.vndAntThinkingBudget : payload.max_tokens - 1,
-    } : {
-      type: 'disabled',
-    };
-    delete payload.temperature;
+    if (model.vndAntThinkingBudget === 'adaptive') {
+      payload.thinking = {
+        type: 'adaptive',
+      };
+      delete payload.temperature;
+    } else if (model.vndAntThinkingBudget !== null) {
+      payload.thinking = {
+        type: 'enabled',
+        budget_tokens: model.vndAntThinkingBudget < payload.max_tokens ? model.vndAntThinkingBudget : payload.max_tokens - 1,
+      };
+      delete payload.temperature;
+    } else {
+      payload.thinking = {
+        type: 'disabled',
+      };
+      // NOTE: with thinking disabled, we can still use temperature, so we don't delete it
+      //       see the note on llms.parameters.ts: 'llmVndAntThinkingBudget'
+    }
   }
 
   // [Anthropic] Effort parameter [Anthropic, effort-2025-11-24]
@@ -151,18 +162,21 @@ export function aixToAnthropicMessageCreate(model: AixAPI_Model, _chatGenerate: 
       effort: model.vndAntEffort,
     };
 
-  // [Anthropic, 2025-11-13] Structured Outputs - JSON output format
+  // [Anthropic, 2026-01-29 GA] Structured Outputs - JSON output format (now in output_config.format)
   if (model.strictJsonOutput) {
 
     // auto-add additionalProperties: false to root object if not present - required by Anthropic
     let schema = model.strictJsonOutput.schema;
     if (schema && typeof schema === 'object' && schema.type === 'object' && schema.additionalProperties === undefined)
       schema = { ...schema, additionalProperties: false };
-    payload.output_format = { type: 'json_schema', schema };
+    payload.output_config = {
+      ...payload.output_config,
+      format: { type: 'json_schema', schema },
+    };
 
     // warn about incompatible features (citations are enabled via web_fetch tool)
     if (model.vndAntWebFetch === 'auto')
-      console.warn('[Anthropic] Structured output_format may conflict with web_fetch citations');
+      console.warn('[Anthropic] Structured output_config.format may conflict with web_fetch citations');
   }
 
   // --- Tools ---
@@ -182,6 +196,10 @@ export function aixToAnthropicMessageCreate(model: AixAPI_Model, _chatGenerate: 
         type: 'web_search_20250305',
         name: 'web_search',
         max_uses: 10, // Allow up to 10 progressive searches // FIXME: HARDCODED
+        // Pass user geolocation for location-aware search results
+        ...(model.userGeolocation ? {
+          user_location: { type: 'approximate' as const, ...model.userGeolocation },
+        } : {}),
       });
     }
 
