@@ -8,10 +8,11 @@ import { createDebugWireLogger } from '~/server/wire';
 import { fetchJsonOrTRPCThrow } from '~/server/trpc/trpc.router.fetchers';
 
 import type { ModelDescriptionSchema } from './llm.server.types';
+import { llmsAutoImplyInterfaces } from './models.mappings';
 
 
 // protocol: Anthropic
-import { anthropicInjectVariants, anthropicValidateModelDefs_DEV, AnthropicWire_API_Models_List, hardcodedAnthropicModels, llmsAntCreatePlaceholderModel, llmsAntInjectWebSearchInterface } from './anthropic/anthropic.models';
+import { anthropicInjectVariants, anthropicValidateModelDefs_DEV, AnthropicWire_API_Models_List, hardcodedAnthropicModels, llmsAntCreatePlaceholderModel } from './anthropic/anthropic.models';
 import { ANTHROPIC_API_PATHS, anthropicAccess } from './anthropic/anthropic.access';
 
 // protocol: Gemini
@@ -26,7 +27,7 @@ import { wireOllamaListModelsSchema, wireOllamaModelInfoSchema } from './ollama/
 
 // protocol: OpenAI-compatible
 import type { OpenAIWire_API_Models_List } from '~/modules/aix/server/dispatch/wiretypes/openai.wiretypes';
-import { OPENAI_API_PATHS, openAIAccess } from './openai/openai.access';
+import { llmsHostnameMatches, OPENAI_API_PATHS, openAIAccess } from './openai/openai.access';
 import { alibabaModelFilter, alibabaModelSort, alibabaModelToModelDescription } from './openai/models/alibaba.models';
 import { azureDeploymentFilter, azureDeploymentToModelDescription, azureParseFromDeploymentsAPI } from './openai/models/azure.models';
 import { chutesAIHeuristic, chutesAIModelsToModelDescriptions } from './openai/models/chutesai.models';
@@ -69,7 +70,8 @@ function createDispatch<T>(dispatch: ListModelsDispatch<T>): ListModelsDispatch<
 export async function listModelsRunDispatch(access: AixAPI_Access, signal?: AbortSignal): Promise<ModelDescriptionSchema[]> {
   const dispatch = _listModelsCreateDispatch(access, signal);
   const wireModels = await dispatch.fetchModels();
-  return dispatch.convertToDescriptions(wireModels);
+  return dispatch.convertToDescriptions(wireModels)
+    .map(llmsAutoImplyInterfaces); // auto-inject implied IFs from parameterSpecs
 }
 
 
@@ -109,7 +111,7 @@ function _listModelsCreateDispatch(access: AixAPI_Access, signal?: AbortSignal):
           anthropicValidateModelDefs_DEV(availableModels);
 
           // sort by: family (desc) > class (desc) > date (desc) -- Future NOTE: -5- will match -4-5- and -3-5-.. figure something else out
-          const familyPrecedence = ['-4-7-', '-4-5-', '-4-1-', '-4-', '-3-7-', '-3-5-', '-3-'];
+          const familyPrecedence = ['-4-7-', '-4-6', '-4-5-', '-4-1-', '-4-', '-3-7-', '-3-5-', '-3-'];
           const classPrecedence = ['-opus-', '-sonnet-', '-haiku-'];
 
           const getFamilyIdx = (id: string) => familyPrecedence.findIndex(f => id.includes(f));
@@ -146,8 +148,7 @@ function _listModelsCreateDispatch(access: AixAPI_Access, signal?: AbortSignal):
               return llmsAntCreatePlaceholderModel(model);
             })
             // inject thinking variants using the centralized variant system
-            .reduce(anthropicInjectVariants, [])
-            .map(llmsAntInjectWebSearchInterface);
+            .reduce(anthropicInjectVariants, []);
         },
       });
     }
@@ -404,11 +405,12 @@ function _listModelsCreateDispatch(access: AixAPI_Access, signal?: AbortSignal):
                 return fastAPIModels(maybeModels);
 
               // [OpenAI or OpenAI-compatible]: chat-only models, custom sort, manual mapping
+              const isNotOpenai = !!(oaiHost && !llmsHostnameMatches(oaiHost, 'api.openai.com')); // empty host (uses default) or explicitly api.openai.com
               const models = maybeModels
                 // limit to only 'gpt' and 'non instruct' models
                 .filter(openAIModelFilter)
                 // to model description
-                .map((model: any): ModelDescriptionSchema => openAIModelToModelDescription(model.id, model.created))
+                .map((model: any): ModelDescriptionSchema => openAIModelToModelDescription(model.id, { isNotOpenai, modelCreated: model.created }))
                 // inject variants
                 .reduce(openAIInjectVariants, [])
                 // custom OpenAI sort

@@ -136,6 +136,14 @@ export const DModelParameterRegistry = {
     // No initialValue - undefined means off (e.g. default 200K context window)
   },
 
+  llmVndAntEffortMax: { // introduced with Claude Opus 4.6; this adds the 'max' level on top of llmVndAntEffort
+    label: 'Effort',
+    type: 'enum' as const,
+    description: 'Controls thinking depth. max = deepest reasoning with no constraints, high = default.',
+    values: ['low', 'medium', 'high', 'max'] as const,
+    // No initialValue - undefined means high effort (default)
+  } as const,
+
   llmVndAntEffort: {
     label: 'Effort',
     type: 'enum' as const,
@@ -151,18 +159,23 @@ export const DModelParameterRegistry = {
     initialValue: '', // empty string = disabled
   },
 
+  /**
+   * Important: when this is set to anything other than nullish, it enables Adaptive(-1)/Extended(int > 1024) thinking,
+   * and as a side effect **disables the temperature** in the requests (even when tunneled through OpenRouter). So this
+   * control must disable the UI controls for temperature in both the side panel and the model configuration dialog.
+   */
   llmVndAntThinkingBudget: {
     label: 'Thinking Budget',
     type: 'integer',
     description: 'Budget for extended thinking',
     range: [1024, 65536] as const,
-    initialValue: 16384,
-    nullable: {
+    initialValue: 16384, // special: '-1' is an out-of-range sentinel for 'adaptive' thinking (hidden, used for 4.6+)
+    nullable: { // null means to not turn on thinking at all, and it's the user-overridden equivalent to the param missing
       meaning: 'Disable extended thinking',
     },
   },
 
-  llmVndAntWebFetch: {
+  llmVndAntWebFetch: { // implies: LLM_IF_Tools_WebSearch
     label: 'Web Fetch',
     type: 'enum',
     description: 'Enable fetching content from web pages and PDFs',
@@ -170,7 +183,7 @@ export const DModelParameterRegistry = {
     // No initialValue - undefined means off (same as 'off')
   },
 
-  llmVndAntWebSearch: {
+  llmVndAntWebSearch: { // implies: LLM_IF_Tools_WebSearch
     label: 'Web Search',
     type: 'enum',
     description: 'Enable web search for real-time information',
@@ -186,7 +199,7 @@ export const DModelParameterRegistry = {
   //   // No initialValue - undefined means off (tool search disabled)
   // } as const,
 
-  llmVndGeminiAspectRatio: {
+  llmVndGeminiAspectRatio: { // implies: LLM_IF_Outputs_Image
     label: 'Aspect Ratio',
     type: 'enum',
     description: 'Controls the aspect ratio of generated images',
@@ -211,7 +224,7 @@ export const DModelParameterRegistry = {
     // requiredFallback: 'browser', // See `const _requiredParamId: DModelParameterId[]` in llms.parameters.ts for why custom params don't have required values at AIX invocation...
   },
 
-  llmVndGeminiGoogleSearch: {
+  llmVndGeminiGoogleSearch: { // implies: LLM_IF_Tools_WebSearch
     label: 'Google Search',
     type: 'enum',
     description: 'Enable Google Search grounding with optional time filter',
@@ -219,7 +232,7 @@ export const DModelParameterRegistry = {
     // No initialValue - undefined means off
   },
 
-  llmVndGeminiImageSize: { // [Gemini, 2025-11-20] Nano Banana launch
+  llmVndGeminiImageSize: { // implies: LLM_IF_Outputs_Image - [Gemini, 2025-11-20] Nano Banana launch
     label: 'Image Size',
     type: 'enum',
     description: 'Controls the resolution of generated images',
@@ -290,7 +303,7 @@ export const DModelParameterRegistry = {
     // No initialValue - undefined means high (thinking enabled, the default for K2.5)
   },
 
-  llmVndMoonshotWebSearch: {
+  llmVndMoonshotWebSearch: { // implies: LLM_IF_Tools_WebSearch
     label: 'Web Search',
     type: 'enum',
     description: 'Enable Kimi\'s $web_search builtin function for real-time web search ($0.005 per search)',
@@ -353,7 +366,7 @@ export const DModelParameterRegistry = {
     requiredFallback: 'medium',
   },
 
-  llmVndOaiWebSearchContext: {
+  llmVndOaiWebSearchContext: { // implies: LLM_IF_Tools_WebSearch
     label: 'Search Context Size',
     type: 'enum',
     description: 'Amount of context retrieved from the web',
@@ -372,7 +385,7 @@ export const DModelParameterRegistry = {
     initialValue: false,
   },
 
-  llmVndOaiImageGeneration: {
+  llmVndOaiImageGeneration: { // implies: LLM_IF_Outputs_Image
     label: 'Image Generation',
     type: 'enum',
     description: 'Image generation mode and quality',
@@ -401,7 +414,7 @@ export const DModelParameterRegistry = {
     // requiredFallback: 'unfiltered',
   },
 
-  llmVndOrtWebSearch: {
+  llmVndOrtWebSearch: { // implies: LLM_IF_Tools_WebSearch
     label: 'Web Search',
     type: 'enum',
     description: 'Enable OpenRouter web search (uses native search for OpenAI/Anthropic, Exa for others)',
@@ -409,7 +422,7 @@ export const DModelParameterRegistry = {
     // No initialValue - undefined means off
   },
 
-  llmVndPerplexitySearchMode: {
+  llmVndPerplexitySearchMode: { // implies: LLM_IF_Tools_WebSearch
     label: 'Search Mode',
     type: 'enum',
     description: 'Type of sources to search',
@@ -435,7 +448,7 @@ export const DModelParameterRegistry = {
     // No initialValue - undefined means unfiltered
   },
 
-  llmVndXaiWebSearch: {
+  llmVndXaiWebSearch: { // implies: LLM_IF_Tools_WebSearch
     label: 'Web Search',
     type: 'enum',
     description: 'Enable web search for real-time information',
@@ -443,7 +456,7 @@ export const DModelParameterRegistry = {
     // No initialValue - undefined means off (same as 'off')
   },
 
-  llmVndXaiXSearch: {
+  llmVndXaiXSearch: { // implies: LLM_IF_Tools_WebSearch
     label: 'X Search',
     type: 'enum',
     description: 'Enable X/Twitter search for social media content',

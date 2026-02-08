@@ -6,6 +6,8 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import RestoreIcon from '@mui/icons-material/Restore';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 
 import type { DModelsService, DModelsServiceId } from '~/common/stores/llms/llms.service.types';
 import { AppBreadcrumbs } from '~/common/components/AppBreadcrumbs';
@@ -120,6 +122,24 @@ export function ModelsConfiguratorModal(props: {
     ).then(() => llmsStoreActions().resetServiceUserParameters(activeServiceId)).catch(() => null /* ignore closure */);
   }, [activeService?.label, activeServiceId, showPromisedOverlay]);
 
+  const handleResetVisibility = React.useCallback(() => {
+    showPromisedOverlay('llms-reset-visibility', {}, ({ onResolve, onUserReject }) =>
+      <ConfirmationModal
+        open onClose={onUserReject} onPositive={() => onResolve(true)}
+        confirmationText={`Reset visibility for all models in ${activeService?.label ?? 'this service'}? Models will revert to their default visibility.`}
+        positiveActionText='Reset'
+      />,
+    ).then(() => llmsStoreActions().resetServiceVisibility(activeServiceId)).catch(() => null /* ignore closure */);
+  }, [activeService?.label, activeServiceId, showPromisedOverlay]);
+
+  const handleHideAllModels = React.useCallback(() => {
+    llmsStoreActions().setServiceModelsHidden(activeServiceId, true);
+  }, [activeServiceId]);
+
+  const handleShowAllModels = React.useCallback(() => {
+    llmsStoreActions().setServiceModelsHidden(activeServiceId, false);
+  }, [activeServiceId]);
+
   const handleRemoveClones = React.useCallback(() => {
     showPromisedOverlay('llms-remove-clones', {}, ({ onResolve, onUserReject }) =>
       <ConfirmationModal
@@ -173,7 +193,7 @@ export function ModelsConfiguratorModal(props: {
 
             {/* Service Name Header */}
             {/*<ListItem sx={{ '--ListItem-minHeight': '2.5rem' }}>*/}
-            {/*  <ListItemDecorator><LLMVendorIcon vendorId={activeService?.vId} /></ListItemDecorator>*/}
+            {/*  <ListItemDecorator><LLMVendorIconSprite vendorId={activeService?.vId} /></ListItemDecorator>*/}
             {/*  <div>{activeService?.label ?? ''}</div>*/}
             {/*</ListItem>*/}
             {/*<ListDivider sx={{ mt: 0 }} />*/}
@@ -196,6 +216,22 @@ export function ModelsConfiguratorModal(props: {
             <MenuItem disabled={false /* unnecessary: !hasClones */} onClick={handleRemoveClones}>
               <ListItemDecorator><DeleteOutlineIcon /></ListItemDecorator>
               Remove Duplicate Models
+            </MenuItem>
+
+            <ListDivider />
+
+            {/* Visibility actions */}
+            <MenuItem onClick={handleShowAllModels}>
+              <ListItemDecorator><VisibilityIcon /></ListItemDecorator>
+              Show All Models
+            </MenuItem>
+            <MenuItem onClick={handleHideAllModels}>
+              <ListItemDecorator><VisibilityOffIcon /></ListItemDecorator>
+              Hide All Models
+            </MenuItem>
+            <MenuItem onClick={handleResetVisibility}>
+              <ListItemDecorator><RestoreIcon /></ListItemDecorator>
+              Reset Visibility
             </MenuItem>
 
             <ListDivider />
@@ -223,7 +259,7 @@ export function ModelsConfiguratorModal(props: {
       );
 
     return undefined;
-  }, [handleRefreshModels, handleRemoveClones, handleResetAllParameters, handleShowAdvanced, handleShowWizard, hasAnyServices, hasLLMs, isMobile, isRefreshing, isTabSetup, isTabWizard, setShowModelsHidden, showModelsHidden]);
+  }, [handleHideAllModels, handleRefreshModels, handleRemoveClones, handleResetAllParameters, handleResetVisibility, handleShowAdvanced, handleShowAllModels, handleShowWizard, hasAnyServices, hasLLMs, isMobile, isRefreshing, isTabSetup, isTabWizard, setShowModelsHidden, showModelsHidden]);
 
 
   // custom done button for wizard mode (combines start and close buttons)

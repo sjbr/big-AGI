@@ -1,11 +1,12 @@
 import type { GeminiWire_API_Models_List } from '~/modules/aix/server/dispatch/wiretypes/gemini.wiretypes';
 
-import type { ModelDescriptionSchema } from '../llm.server.types';
-import { createVariantInjector, ModelVariantMap } from '../llm.server.variants';
-import { llmDevCheckModels_DEV } from '../models.mappings';
-
+import type { DModelParameterId } from '~/common/stores/llms/llms.parameters';
 import { LLM_IF_GEM_CodeExecution, LLM_IF_HOTFIX_NoStream, LLM_IF_HOTFIX_StripImages, LLM_IF_HOTFIX_StripSys0, LLM_IF_HOTFIX_Sys0ToUsr0, LLM_IF_OAI_Chat, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_PromptCaching, LLM_IF_OAI_Reasoning, LLM_IF_OAI_Vision, LLM_IF_Outputs_Audio, LLM_IF_Outputs_Image, LLM_IF_Outputs_NoText } from '~/common/stores/llms/llms.types';
 import { Release } from '~/common/app.release';
+
+import type { ModelDescriptionSchema, OrtVendorLookupResult } from '../llm.server.types';
+import { createVariantInjector, ModelVariantMap } from '../llm.server.variants';
+import { llmDevCheckModels_DEV } from '../models.mappings';
 
 
 // dev options
@@ -144,7 +145,7 @@ const gemini20FlashLitePricing: ModelDescriptionSchema['chatPrice'] = {
 
 const IF_25 = [LLM_IF_OAI_Chat, LLM_IF_OAI_Vision, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_Reasoning, LLM_IF_GEM_CodeExecution, LLM_IF_OAI_PromptCaching];
 const IF_30 = [...IF_25]; // Note: Gemini 3 Developer Guide recommends temperature=1.0, which is now set as the default via initialTemperature
-const IF_30_IMG = [...IF_30, LLM_IF_Outputs_Image];
+// NOTE: LLM_IF_Outputs_Image is auto-implied by llmsAutoImplyInterfaces() from image parameterSpecs (llmVndGeminiAspectRatio, llmVndGeminiImageSize)
 
 
 const _knownGeminiModels: ({
@@ -181,7 +182,7 @@ const _knownGeminiModels: ({
     labelOverride: 'Nano Banana Pro', // Marketing name for the technical model ID
     isPreview: true,
     chatPrice: gemini30ProImagePricing,
-    interfaces: IF_30_IMG,
+    interfaces: IF_30,
     parameterSpecs: [
       // { paramId: 'llmVndGeminiShowThoughts' },
       { paramId: 'llmVndGeminiGoogleSearch' },
@@ -197,7 +198,7 @@ const _knownGeminiModels: ({
     // copied from symlink
     isPreview: true,
     chatPrice: gemini30ProImagePricing,
-    interfaces: IF_30_IMG,
+    interfaces: IF_30,
     parameterSpecs: [
       // { paramId: 'llmVndGeminiShowThoughts' },
       { paramId: 'llmVndGeminiGoogleSearch' },
@@ -351,7 +352,7 @@ const _knownGeminiModels: ({
     labelOverride: 'Nano Banana',
     deprecated: '2026-10-02',
     chatPrice: { input: 0.30, output: undefined }, // Per pricing page: $0.30 text/image input, $0.039 per image output, but the text output is not stated
-    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Vision, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_Outputs_Image],
+    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Vision, LLM_IF_OAI_Fn, LLM_IF_OAI_Json],
     parameterSpecs: [{ paramId: 'llmVndGeminiAspectRatio' }],
     benchmark: undefined, // Non-benchmarkable because generates images
   },
@@ -847,4 +848,40 @@ const _hardcodedGeminiVariants: ModelVariantMap = {
 
 export function geminiModelsAddVariants(models: ModelDescriptionSchema[]): ModelDescriptionSchema[] {
   return models.reduce(createVariantInjector(_hardcodedGeminiVariants, 'after'), [] as ModelDescriptionSchema[]);
+}
+
+
+// -- Gemini-through-OpenRouter Vendor Lookup --
+
+const _ORT_GEM_IF_ALLOWLIST: ReadonlySet<string> = new Set([
+  LLM_IF_OAI_Chat, LLM_IF_OAI_Vision, LLM_IF_OAI_Fn, LLM_IF_OAI_Json, LLM_IF_OAI_Reasoning,
+  LLM_IF_Outputs_Image, // let image generation happen through OR (works also with the params below) - NOTE: for the few models that don't have image config params and so it's not added to those
+  LLM_IF_HOTFIX_StripImages, LLM_IF_HOTFIX_Sys0ToUsr0, // for Gemma support, client-side fixes
+] as const);
+
+const _ORT_GEM_PARAM_ALLOWLIST: ReadonlySet<string> = new Set([
+  'llmVndGeminiThinkingBudget', 'llmVndGeminiThinkingLevel', 'llmVndGeminiThinkingLevel4', // OR supports Gemini thinking
+  'llmVndGeminiAspectRatio', 'llmVndGeminiImageSize', // OR supports Gemini image generation
+] as const satisfies DModelParameterId[]);
+
+/**
+ * Lookup for OpenRouter: match an OR Google model ID to a known hardcoded Gemini model
+ * @param orModelName - The model name after stripping 'google/' prefix (e.g. 'gemini-2.5-pro')
+ */
+export function llmOrtGemLookup(orModelName: string): OrtVendorLookupResult | undefined {
+
+  // match: OR 'gemini-2.5-pro' → native 'models/gemini-2.5-pro' (exact or prefix match)
+  const nativePrefix = 'models/' + orModelName;
+  const knownModel = _knownGeminiModels.find(m => m.id === nativePrefix)
+    || _knownGeminiModels.find(m => m.id.startsWith(nativePrefix + '-') && !m.symLink);
+  if (!knownModel?.interfaces) return undefined;
+
+  // allowlists on interfaces and parameter specs
+  const interfaces = knownModel.interfaces.filter(i => _ORT_GEM_IF_ALLOWLIST.has(i));
+
+  const parameterSpecs = knownModel.parameterSpecs
+    ?.filter(spec => _ORT_GEM_PARAM_ALLOWLIST.has(spec.paramId))
+    .map(spec => ({ ...spec }));
+
+  return { interfaces, parameterSpecs, initialTemperature: GEMINI_DEFAULT_TEMPERATURE };
 }
