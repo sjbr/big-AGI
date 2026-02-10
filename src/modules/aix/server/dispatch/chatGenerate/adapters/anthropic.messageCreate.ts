@@ -10,6 +10,8 @@ import { aixSpillShallFlush, aixSpillSystemToUser, approxDocPart_To_String, appr
 const hotFixImagePartsFirst = true;
 const hotFixMapModelImagesToUser = true;
 const hotFixDisableThinkingWhenToolsForced = true; // "Thinking may not be enabled when tool_choice forces tool use."
+const hotFixAntSeparateContiguousThinkingBlocks = true; // Interleave continuous thinking blocks (without aText) with the following text block, instead of merging them into a single block - should be more robust to unexpected thinking block formats and to changes in the thinking block format, as we have seen some variations and we might see more in the future
+// const hotFixAntShipNoEmptyTextBlocks = true; // If empty text blocks are found (e.g. produced by the API), do not ship them or things will break
 
 // former fixes, now removed
 // const hackyHotFixStartWithUser = false; // 2024-10-22: no longer required
@@ -29,11 +31,11 @@ export function aixToAnthropicMessageCreate(model: AixAPI_Model, _chatGenerate: 
       switch (part.pt) {
 
         case 'text':
-          acc.push(AnthropicWire_Blocks.TextBlock(part.text));
+          acc.push(AnthropicWire_Blocks.TextBlock(part.text, 'system.text'));
           break;
 
         case 'doc':
-          acc.push(AnthropicWire_Blocks.TextBlock(approxDocPart_To_String(part)));
+          acc.push(AnthropicWire_Blocks.TextBlock(approxDocPart_To_String(part), 'system.doc'));
           break;
 
         case 'inline_image':
@@ -85,6 +87,18 @@ export function aixToAnthropicMessageCreate(model: AixAPI_Model, _chatGenerate: 
           chatMessages.push(currentMessage);
         currentMessage = { role, content: [] };
       }
+
+      // Hotfix Opus-4.6: a new thinking block cannot follow a thinking or redacted_thinking block directly
+      // (redacted_thinking after thinking is fine - that's the normal pattern)
+      if (hotFixAntSeparateContiguousThinkingBlocks && content.type === 'thinking' && currentMessage.content.length) {
+        const lastBlock = currentMessage.content[currentMessage.content.length - 1];
+        if (lastBlock.type === 'thinking' || lastBlock.type === 'redacted_thinking') {
+          // FIXME: this happens because some intermediate 'tool requests + responses' may have been skipped, so thinking messages became contiguous
+          console.log(`[DEV] Anthropic: 🔷 Separating contiguous ${lastBlock.type} -> thinking with text separator`);
+          currentMessage.content.push(AnthropicWire_Blocks.TextBlock('\n', 'hotfix.thinking-separator'));
+        }
+      }
+
       currentMessage.content.push(content);
     }
 
@@ -294,7 +308,7 @@ function* _generateAnthropicMessagesContentBlocks({ parts, role }: AixMessages_C
         switch (part.pt) {
 
           case 'text':
-            yield { role: 'user', content: AnthropicWire_Blocks.TextBlock(part.text) };
+            yield { role: 'user', content: AnthropicWire_Blocks.TextBlock(part.text, 'user.text') };
             break;
 
           case 'inline_image':
@@ -302,13 +316,13 @@ function* _generateAnthropicMessagesContentBlocks({ parts, role }: AixMessages_C
             break;
 
           case 'doc':
-            yield { role: 'user', content: AnthropicWire_Blocks.TextBlock(approxDocPart_To_String(part)) };
+            yield { role: 'user', content: AnthropicWire_Blocks.TextBlock(approxDocPart_To_String(part), 'user.doc') };
             break;
 
           case 'meta_in_reference_to':
             const irtXMLString = approxInReferenceTo_To_XMLString(part);
             if (irtXMLString)
-              yield { role: 'user', content: AnthropicWire_Blocks.TextBlock(irtXMLString) };
+              yield { role: 'user', content: AnthropicWire_Blocks.TextBlock(irtXMLString, 'user.irt') };
             break;
 
           case 'meta_cache_control':
@@ -326,7 +340,7 @@ function* _generateAnthropicMessagesContentBlocks({ parts, role }: AixMessages_C
         switch (part.pt) {
 
           case 'text':
-            yield { role: 'assistant', content: AnthropicWire_Blocks.TextBlock(part.text) };
+            yield { role: 'assistant', content: AnthropicWire_Blocks.TextBlock(part.text, 'model.text') };
             break;
 
           case 'inline_audio':
@@ -385,11 +399,11 @@ function* _generateAnthropicMessagesContentBlocks({ parts, role }: AixMessages_C
             const toolErrorPrefix = part.error ? (typeof part.error === 'string' ? `[ERROR] ${part.error} - ` : '[ERROR] ') : '';
             switch (part.response.type) {
               case 'function_call':
-                const fcTextParts = [AnthropicWire_Blocks.TextBlock(toolErrorPrefix + part.response.result)];
+                const fcTextParts = [AnthropicWire_Blocks.TextBlock(toolErrorPrefix + part.response.result, 'tool.fc_result')];
                 yield { role: 'user', content: AnthropicWire_Blocks.ToolResultBlock(part.id, fcTextParts, part.error ? true : undefined) };
                 break;
               case 'code_execution':
-                const ceTextParts = [AnthropicWire_Blocks.TextBlock(toolErrorPrefix + part.response.result)];
+                const ceTextParts = [AnthropicWire_Blocks.TextBlock(toolErrorPrefix + part.response.result, 'tool.ce_result')];
                 yield { role: 'user', content: AnthropicWire_Blocks.ToolResultBlock(part.id, ceTextParts, part.error ? true : undefined) };
                 break;
               default:
