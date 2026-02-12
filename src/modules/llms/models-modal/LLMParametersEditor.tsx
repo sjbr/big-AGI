@@ -250,6 +250,7 @@ export function LLMParametersEditor(props: {
     llmVndAnt1MContext,
     llmVndAntEffort,
     llmVndAntEffortMax,
+    llmVndAntInfSpeed,
     llmVndAntSkills,
     llmVndAntThinkingBudget,
     llmVndAntWebFetch,
@@ -284,6 +285,7 @@ export function LLMParametersEditor(props: {
     llmVndXaiWebSearch,
     llmVndXaiXSearch,
     llmVndXaiXSearchHandles,
+    llmVndZaiReasoningEffort,
   } = allParameters;
 
 
@@ -467,6 +469,20 @@ export function LLMParametersEditor(props: {
       />
     )}
 
+    {/* Anthropic Fast Mode - currently hidden via parameterSpec.hidden */}
+    {showParam('llmVndAntInfSpeed') && (
+      <FormSwitchControl
+        title='Fast Mode (Preview)'
+        description={llmVndAntInfSpeed === 'fast' ? 'Fast - 6x pricing ⚠️' : 'Standard (default)'}
+        tooltip='Accelerated inference (~2.5x faster output) at 6x pricing. Preview access required.'
+        checked={llmVndAntInfSpeed === 'fast'}
+        onChange={(checked) => {
+          if (!checked) onRemoveParameter('llmVndAntInfSpeed');
+          else onChangeParameter({ llmVndAntInfSpeed: 'fast' });
+        }}
+      />
+    )}
+
     {isExtra && showParam('llmVndAntSkills') && (
       <AnthropicSkillsConfig llmVndAntSkills={llmVndAntSkills} onChangeParameter={onChangeParameter} onRemoveParameter={onRemoveParameter} />
     )}
@@ -637,6 +653,19 @@ export function LLMParametersEditor(props: {
     {/*    options={_moonshotWebSearchOptions}*/}
     {/*  />*/}
     {/*)}*/}
+
+    {showParam('llmVndZaiReasoningEffort') && (
+      <FormSelectControl
+        title='Thinking'
+        tooltip='Enable thinking mode for GLM models'
+        value={llmVndZaiReasoningEffort ?? _UNSPECIFIED}
+        onChange={(value) => {
+          if (value === _UNSPECIFIED || !value) onRemoveParameter('llmVndZaiReasoningEffort');
+          else onChangeParameter({ llmVndZaiReasoningEffort: value });
+        }}
+        options={_moonReasoningEffortOptions}
+      />
+    )}
 
     {showParam('llmVndPerplexitySearchMode') && (
       <FormSelectControl

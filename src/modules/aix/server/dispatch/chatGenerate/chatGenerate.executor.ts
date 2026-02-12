@@ -218,6 +218,9 @@ async function* _consumeDispatchStream(
         demuxedEvents = dispatchDemuxer.flushRemaining();
         _d.profiler?.measureEnd('demux');
 
+        if (demuxedEvents.length > 0)
+          console.warn(`[AIX] _consumeDispatchStream: ${_d.prettyDialect}: stream closed with ${demuxedEvents.length} recovered event(s) from demuxer buffer`);
+
       } else {
 
         // 2. Decode the chunk - does Not throw (see the constructor for why)
@@ -252,13 +255,13 @@ async function* _consumeDispatchStream(
       // ignore events post termination
       if (chatGenerateTx.isEnded) {
         // DEV-only message to fix dispatch protocol parsing -- warning on, because this is important and a sign of a bug
-        console.warn('[chatGenerateContent] Received event after termination:', demuxedItem);
+        console.warn(`[AIX] _consumeDispatchStream: ${_d.prettyDialect}: received stream event after termination. ignoring.`, demuxedItem);
         break; // inner for {}, will break outer
       }
 
       // ignore unknown stream events
       if (demuxedItem.type !== 'event') {
-        // console.log(`[chatGenerateContent] Ignoring non-event stream item of type "${demuxedItem.type}" with data:`, demuxedItem.data);
+        // console.log(`[AIX] _consumeDispatchStream: ${_d.prettyDialect}: ignoring non-event stream item of type "${demuxedItem.type}".`, demuxedItem.data);
         continue; // inner for {}
       }
 
@@ -291,6 +294,12 @@ async function* _consumeDispatchStream(
 
     // 6. Normal stream end - if didn't end in a connection or event parsing error
     if (isFinalIteration && !chatGenerateTx.isEnded) {
+
+      // Log when the dispatch closed the stream but the dialect parser never set a stop reason
+      // Either the provider does not close with a reason (protocol 'bug') or the response may be truncated (cause we're investigating)
+      if (!chatGenerateTx.hasExplicitTokenStopReason)
+        console.warn(`[AIX] _consumeDispatchStream: ${_d.prettyDialect}: stream closed (done-dispatch-closed) without provider termination signal - response may be truncated`);
+
       chatGenerateTx.setEnded('done-dispatch-closed');
       break; // outer do {}
     }
