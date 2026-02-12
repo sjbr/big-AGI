@@ -80,6 +80,7 @@ const ModelParameterSpec_schema = z.object({
     'llmVndAnt1MContext',
     'llmVndAntEffort',
     'llmVndAntEffortMax',
+    'llmVndAntInfSpeed',
     'llmVndAntSkills',
     'llmVndAntThinkingBudget',
     'llmVndAntWebFetch',
@@ -121,6 +122,8 @@ const ModelParameterSpec_schema = z.object({
     'llmVndXaiWebSearch',
     'llmVndXaiXSearch',
     'llmVndXaiXSearchHandles',
+    // Z.ai
+    'llmVndZaiReasoningEffort',
   ] satisfies DModelParameterId[]),
   required: z.boolean().optional(),
   hidden: z.boolean().optional(),

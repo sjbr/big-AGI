@@ -1,44 +1,44 @@
 import * as React from 'react';
 
-import { Typography } from '@mui/joy';
-
 import type { DModelsServiceId } from '~/common/stores/llms/llms.service.types';
 import { AlreadySet } from '~/common/components/AlreadySet';
+import { ExternalLink } from '~/common/components/ExternalLink';
 import { FormInputKey } from '~/common/components/forms/FormInputKey';
+import { FormTextField } from '~/common/components/forms/FormTextField';
 import { InlineError } from '~/common/components/InlineError';
-import { Link } from '~/common/components/Link';
 import { SetupFormClientSideToggle } from '~/common/components/forms/SetupFormClientSideToggle';
 import { SetupFormRefetchButton } from '~/common/components/forms/SetupFormRefetchButton';
 import { useToggleableBoolean } from '~/common/util/hooks/useToggleableBoolean';
 
 import { ApproximateCosts } from '../ApproximateCosts';
-import { ModelVendorPerplexity } from './perplexity.vendor';
 import { useLlmUpdateModels } from '../../llm.client.hooks';
 import { useServiceSetup } from '../useServiceSetup';
 
+import { ModelVendorZAI } from './zai.vendor';
 
-const PERPLEXITY_REG_LINK = 'https://www.perplexity.ai/settings/api';
+
+const ZAI_REG_LINK = 'https://z.ai/manage-apikey/apikey-list';
 
 
-export function PerplexityServiceSetup(props: { serviceId: DModelsServiceId }) {
+export function ZAIServiceSetup(props: { serviceId: DModelsServiceId }) {
+
+  // state
+  const advanced = useToggleableBoolean();
 
   // external state
   const {
     service, serviceAccess, serviceHasCloudTenantConfig, serviceHasLLMs,
     serviceSetupValid, updateSettings,
-  } = useServiceSetup(props.serviceId, ModelVendorPerplexity);
+  } = useServiceSetup(props.serviceId, ModelVendorZAI);
 
   // derived state
-  const { clientSideFetch, oaiKey: perplexityKey } = serviceAccess;
+  const { clientSideFetch, oaiKey: zaiKey, oaiHost: zaiHost } = serviceAccess;
   const needsUserKey = !serviceHasCloudTenantConfig;
+  const showAdvanced = advanced.on || !!clientSideFetch || !!zaiHost;
 
-  // advanced mode - initialize open if CSF is enabled, but let user toggle freely
-  const advanced = useToggleableBoolean(!!clientSideFetch);
-  const showAdvanced = advanced.on;
-
-  // key validation
-  const shallFetchSucceed = !needsUserKey || (!!perplexityKey && serviceSetupValid);
-  const showKeyError = !!perplexityKey && !serviceSetupValid;
+  // validate if url is a well formed proper url with zod
+  const shallFetchSucceed = !needsUserKey || (!!zaiKey && serviceSetupValid);
+  const showKeyError = !!zaiKey && !serviceSetupValid;
 
   // fetch models
   const { isFetching, refetch, isError, error } =
@@ -50,26 +50,30 @@ export function PerplexityServiceSetup(props: { serviceId: DModelsServiceId }) {
     <ApproximateCosts serviceId={service?.id} />
 
     <FormInputKey
-      autoCompleteId='perplexity-key' label='Perplexity API Key'
+      autoCompleteId='zai-key' label='Z.ai Key'
       rightLabel={<>{needsUserKey
-        ? !perplexityKey && <Link level='body-sm' href={PERPLEXITY_REG_LINK} target='_blank'>API keys</Link>
+        ? !zaiKey && <ExternalLink level='body-sm' href={ZAI_REG_LINK}>request Key</ExternalLink>
         : <AlreadySet />}
       </>}
-      value={perplexityKey} onChange={value => updateSettings({ perplexityKey: value })}
+      value={zaiKey} onChange={value => updateSettings({ zaiKey: value })}
       required={needsUserKey} isError={showKeyError}
-      placeholder='...'
+      placeholder='Your Z.ai API Key'
     />
 
-    <Typography level='body-sm'>
-      The <Link href='https://docs.perplexity.ai/docs/getting-started'>Perplexity API</Link> offers inference
-      as a service for a variety of models. See the <Link href='https://www.perplexity.ai/' target='_blank'>Perplexity AI</Link> website for more information.
-    </Typography>
+    {showAdvanced && <FormTextField
+      autoCompleteId='zai-host'
+      title='API Host'
+      tooltip={`An alternative Z.ai API endpoint to use instead of the default 'api.z.ai'.\n\nExample:\n - https://api.z.ai/api/paas`}
+      placeholder='e.g., https://api.z.ai/api/paas'
+      value={zaiHost}
+      onChange={text => updateSettings({ zaiHost: text })}
+    />}
 
     {showAdvanced && <SetupFormClientSideToggle
-      visible={!!perplexityKey}
+      visible={!!zaiKey}
       checked={!!clientSideFetch}
       onChange={on => updateSettings({ csf: on })}
-      helpText='Connect directly to Perplexity API from your browser instead of through the server.'
+      helpText='Connect directly to Z.ai API from your browser instead of through the server.'
     />}
 
     <SetupFormRefetchButton refetch={refetch} disabled={/*!shallFetchSucceed ||*/ isFetching} loading={isFetching} error={isError} advanced={advanced} />

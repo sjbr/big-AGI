@@ -65,6 +65,7 @@ export function createChatGenerateDispatch(access: AixAPI_Access, model: AixAPI_
         vndAnt1MContext: model.vndAnt1MContext === true,
         vndAntEffort: !!model.vndAntEffort,
         enableSkills: !!model.vndAntSkills,
+        enableFastMode: model.vndAntInfSpeed === 'fast',
         enableStrictOutputs: !!model.strictJsonOutput || !!model.strictToolInvocations, // [Anthropic, 2025-11-13] for both JSON output and grammar-constrained tool invocations inputs
         enableToolSearch: !!model.vndAntToolSearch,
         enableProgrammaticToolCalling: usesProgrammaticToolCalling,
@@ -143,6 +144,7 @@ export function createChatGenerateDispatch(access: AixAPI_Access, model: AixAPI_
     case 'perplexity':
     case 'togetherai':
     case 'xai':
+    case 'zai':
 
       // newer: OpenAI Responses API, for models that support it and all XAI models
       const isResponsesAPI = !!model.vndOaiResponsesAPI;
@@ -234,6 +236,7 @@ export function createChatGenerateResumeDispatch(access: AixAPI_Access, resumeHa
     case 'perplexity':
     case 'togetherai':
     case 'xai':
+    case 'zai':
       // Throw on unsupported protocols (Azure and OpenRouter are speculatively supported)
       throw new Error(`Resume not supported for dialect: ${dialect}`);
 
