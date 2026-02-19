@@ -15,10 +15,10 @@ import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
 
 import { type DPricingChatGenerate, isLLMChatFree_cached, llmChatPricing_adjusted } from '~/common/stores/llms/llms.pricing';
 import type { ModelOptionsContext } from '~/common/layout/optima/store-layout-optima';
-import { DLLMId, DModelInterfaceV1, getLLMContextTokens, getLLMMaxOutputTokens, isLLMVisible, LLM_IF_HOTFIX_NoStream, LLM_IF_HOTFIX_NoTemperature, LLM_IF_OAI_Reasoning } from '~/common/stores/llms/llms.types';
-import { FALLBACK_LLM_PARAM_TEMPERATURE } from '~/common/stores/llms/llms.parameters';
+import { DLLMId, DModelInterfaceV1, getLLMContextTokens, getLLMLabel, getLLMMaxOutputTokens, isLLMVisible, LLM_IF_HOTFIX_NoStream, LLM_IF_HOTFIX_NoTemperature, LLM_IF_OAI_Reasoning } from '~/common/stores/llms/llms.types';
 import { FormLabelStart } from '~/common/components/forms/FormLabelStart';
 import { GoodModal } from '~/common/components/modals/GoodModal';
+import { LLMImplicitParametersRuntimeFallback } from '~/common/stores/llms/llms.parameters';
 import { ModelDomainsList, ModelDomainsRegistry } from '~/common/stores/llms/model.domains.registry';
 import { TooltipOutlined } from '~/common/components/TooltipOutlined';
 import { llmsStoreActions } from '~/common/stores/llms/store-llms';
@@ -135,7 +135,11 @@ export function LLMOptionsModal(props: { id: DLLMId, context?: ModelOptionsConte
     const updates: Partial<typeof llm> = { interfaces: newInterfaces };
     switch (iface) {
       case LLM_IF_HOTFIX_NoTemperature:
-        updates.initialParameters = { ...llm.initialParameters, llmTemperature: enable ? null : FALLBACK_LLM_PARAM_TEMPERATURE };
+        updates.initialParameters = {
+          ...llm.initialParameters,
+          llmTemperature: enable ? null
+            : LLMImplicitParametersRuntimeFallback.llmTemperature,
+        };
         const { llmTemperature: _, ...otherUserParameters } = { ...llm.userParameters };
         updates.userParameters = otherUserParameters;
         break;
@@ -148,7 +152,11 @@ export function LLMOptionsModal(props: { id: DLLMId, context?: ModelOptionsConte
   if (!llm)
     return <>Options issue: LLM not found for id {props.id}</>;
 
-  const handleLlmLabelSet = (event: React.ChangeEvent<HTMLInputElement>) => updateLLM(llm.id, { label: event.target.value || '' });
+  const handleLlmLabelSet = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+    // auto-clear userLabel when it matches the vendor default (or is empty)
+    updateLLM(llm.id, { userLabel: (!value || value === llm.label) ? undefined : value });
+  };
 
   const handleLlmVisibilityToggle = () => updateLLM(llm.id, { userHidden: isLLMVisible(llm) });
 
@@ -294,7 +302,7 @@ export function LLMOptionsModal(props: { id: DLLMId, context?: ModelOptionsConte
                 {visible ? <VisibilityIcon sx={{ fontSize: 'xl' }} /> : <VisibilityOffIcon />}
               </IconButton>
             </TooltipOutlined>}
-            <div>{llm.label} <span style={{ opacity: 0.5 }}>options</span></div>
+            <div>{getLLMLabel(llm)} <span style={{ opacity: 0.5 }}>options</span></div>
           </Box>
 
           {/* [Desktop] Reset to default - show only when user has customized parameters */}
@@ -371,7 +379,7 @@ export function LLMOptionsModal(props: { id: DLLMId, context?: ModelOptionsConte
         <Typography level='body-sm' sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
           ➕ Cloned from:{' '}
           {cloneSourceLlm
-            ? <Link component='button' onClick={handleGoToCloneSource}>{cloneSourceLlm.label}</Link>
+            ? <Link component='button' onClick={handleGoToCloneSource}>{getLLMLabel(cloneSourceLlm)}</Link>
             : <Typography component='span' sx={{ color: 'text.tertiary' }}>{llm.cloneSourceId} (not found)</Typography>
           }
         </Typography>
@@ -389,7 +397,7 @@ export function LLMOptionsModal(props: { id: DLLMId, context?: ModelOptionsConte
           <Grid xs={12} md={8}>
             <FormControl orientation='horizontal' sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
               <FormLabelStart title='Name' sx={{ minWidth: 80 }} />
-              <Input variant='outlined' value={llm.label} onChange={handleLlmLabelSet} />
+              <Input variant='outlined' placeholder={llm.label} value={llm.userLabel ?? ''} onChange={handleLlmLabelSet} />
             </FormControl>
           </Grid>
 
