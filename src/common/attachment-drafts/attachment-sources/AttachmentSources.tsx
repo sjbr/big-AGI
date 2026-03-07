@@ -147,15 +147,15 @@ function AutoDownloadToggle(props: { delay?: number }) {
  * Portable attachment sources component.
  *
  * Three modes:
- * - **menu-compact**: Mobile-style — icon trigger, simple MenuItems (no descriptions/animations)
- * - **menu-rich**: Desktop-style — labeled button trigger, rich items with descriptions and animations
+ * - **menu-compact**: Mobile-style - icon trigger, simple MenuItems (no descriptions/animations)
+ * - **menu-rich**: Desktop-style - labeled button trigger, rich items with descriptions and animations
  * - **inline-buttons**: Individual source buttons rendered inline (no dropdown)
  */
 export const AttachmentSourcesMemo = React.memo(AttachmentSources);
 
 function AttachmentSources(props: {
   // mode
-  mode: 'menu-compact' | 'menu-rich' | 'inline-buttons',
+  mode: 'menu-compact' | 'menu-rich' | 'inline-buttons' | 'menu-message',
   color?: ColorPaletteProp, // menu-rich and inline-buttons
   richButtonStandOut?: boolean, // menu-rich only
   // source availability - note that hasGoogleDriveCapability is local
@@ -174,7 +174,7 @@ function AttachmentSources(props: {
   onOpenWebInput: () => void,
 }) {
 
-  // state (screen capture — used in menu modes where the component handles the capture)
+  // state (screen capture - used in menu modes where the component handles the capture)
   const [capturingScreen, setCapturingScreen] = React.useState(false);
   const [screenCaptureError, setScreenCaptureError] = React.useState<string | null>(null);
 
@@ -201,12 +201,12 @@ function AttachmentSources(props: {
   }, [onAttachScreenCapture]);
 
 
-  // inline-buttons mode — individual buttons rendered flat (no dropdown)
+  // inline-buttons mode - individual buttons rendered flat (no dropdown)
   if (props.mode === 'inline-buttons')
     return <>
 
       {/* Files */}
-      <ButtonAttachFilesMemo color={props.color} onAttachFiles={props.onAttachFiles} fullWidth multiple />
+      <ButtonAttachFilesMemo color={props.color} onAttachFiles={props.onAttachFiles} /*fullWidth*/ multiple />
 
       {/* Web */}
       {!props.onlyImages && <ButtonAttachWebMemo color={props.color} disabled={!props.canBrowse} onOpenWebInput={props.onOpenWebInput} />}
@@ -234,14 +234,29 @@ function AttachmentSources(props: {
     </>;
 
 
-  // menu-compact mode (mobile) — simple icon trigger with flat menu items
-  if (props.mode === 'menu-compact')
+  // menu-compact mode (mobile) - simple icon trigger with flat menu items
+  if (props.mode === 'menu-compact' || props.mode === 'menu-message') {
+    const isMessage = props.mode === 'menu-message';
     return <>
 
       <Dropdown>
-        <MenuButton slots={{ root: IconButton }}>
-          <AddRoundedIcon />
-        </MenuButton>
+        {!isMessage ? (
+          <MenuButton slots={{ root: IconButton }}>
+            <AddRoundedIcon />
+          </MenuButton>
+        ) : (
+          <MenuButton slots={{ root: Button }} slotProps={{
+            root: {
+              size: 'sm',
+              variant: 'soft',
+              color: 'warning',
+              startDecorator: <AddRoundedIcon />,
+              sx: { minHeight: '2.25rem', m: -0.25 /* absorb parent's padding */ },
+            },
+          } as const}>
+            Attach
+          </MenuButton>
+        )}
         <Menu sx={{ '--List-padding': '0.5rem' }}>
 
           {/* Files */}
@@ -252,7 +267,7 @@ function AttachmentSources(props: {
           <RichMenuItem name={props.onlyImages ? 'Images' : 'Files'} description='PDF, DOCX, images, code' color={props.color} icon={<AttachFileRoundedIcon />} onClick={handleAttachFilePicker} />
 
           {/* Web */}
-          {!props.onlyImages && (
+          {!props.onlyImages && /*props.canBrowse &&*/ (
             // <MenuItem onClick={props.onOpenWebInput} disabled={!props.canBrowse}>
             //   <ListItemDecorator><LanguageRoundedIcon /></ListItemDecorator>
             //   Web
@@ -288,24 +303,25 @@ function AttachmentSources(props: {
           )}
 
           {/* Camera */}
-          {/*{props.hasCamera && (*/}
-          {/*  // <MenuItem onClick={props.onOpenCamera}>*/}
-          {/*  //   <ListItemDecorator><CameraAltOutlinedIcon /></ListItemDecorator>*/}
-          {/*  //   Camera*/}
-          {/*  // </MenuItem>*/}
-          {/*  <RichMenuItem name='Camera' description='Capture photos and optional OCR' color={props.color} icon={<CameraAltOutlinedIcon />} onClick={props.onOpenCamera} />*/}
-          {/*)}*/}
+          {props.hasCamera && isMessage && (
+            // <MenuItem onClick={props.onOpenCamera}>
+            //   <ListItemDecorator><CameraAltOutlinedIcon /></ListItemDecorator>
+            //   Camera
+            // </MenuItem>
+            <RichMenuItem name='Camera' description='Capture photos and optional OCR' color={props.color} icon={<CameraAltOutlinedIcon />} onClick={props.onOpenCamera} />
+          )}
 
         </Menu>
       </Dropdown>
 
       {/* [mobile] Responsive Camera OCR button */}
-      {props.hasCamera && <ButtonAttachCameraMemo isMobile color={props.color} onOpenCamera={props.onOpenCamera} />}
+      {props.hasCamera && !isMessage && <ButtonAttachCameraMemo isMobile color={props.color} onOpenCamera={props.onOpenCamera} />}
 
     </>;
+  }
 
 
-  // menu-rich mode (desktop) — labeled button trigger with animated, descriptive menu items
+  // menu-rich mode (desktop) - labeled button trigger with animated, descriptive menu items
   return (
     <Dropdown>
       <MenuButton
@@ -369,7 +385,7 @@ function AttachmentSources(props: {
         />
 
         {/* Web/URL Attachment */}
-        {!props.onlyImages && (
+        {!props.onlyImages && /*props.canBrowse &&*/ (
           <RichMenuItem
             name='Web'
             icon={<LanguageRoundedIcon />}
