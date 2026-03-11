@@ -2,12 +2,13 @@ import * as React from 'react';
 import { keyframes } from '@emotion/react';
 import type { FileWithHandle } from 'browser-fs-access';
 
-import { Box, Button, Checkbox, ColorPaletteProp, Divider, Dropdown, IconButton, ListItem, ListItemDecorator, Menu, MenuButton, MenuItem } from '@mui/joy';
+import { Box, Button, Checkbox, ColorPaletteProp, Dropdown, IconButton, ListDivider, ListItem, ListItemDecorator, Menu, MenuButton, MenuItem } from '@mui/joy';
 import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import AddToDriveRoundedIcon from '@mui/icons-material/AddToDriveRounded';
 import AttachFileRoundedIcon from '@mui/icons-material/AttachFileRounded';
 import CameraAltOutlinedIcon from '@mui/icons-material/CameraAltOutlined';
 import ContentPasteGoIcon from '@mui/icons-material/ContentPasteGo';
+import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import LanguageRoundedIcon from '@mui/icons-material/LanguageRounded';
 import ScreenshotMonitorIcon from '@mui/icons-material/ScreenshotMonitor';
 
@@ -35,10 +36,11 @@ const animationMenuItem = keyframes` from {opacity: 0;transform: translateY(-6px
 
 const _style = {
   menuItem: {
-    py: 1,
     // pl: 3,
     // pr: 2,
+    py: 0.5, // was 1
     minHeight: 60,
+    // minHeight: '3.25rem', // now 52, was 60
   } as const,
   menuItemContent: {
     display: 'flex',
@@ -58,6 +60,24 @@ const _style = {
 };
 
 
+// Live feed record button - returns null if onClick is undefined
+function LiveFeedButton(props: { isActive: boolean, onClick: () => void }) {
+  return (
+    <IconButton
+      size='sm'
+      variant={props.isActive ? 'solid' : 'soft'}
+      color='danger'
+      onClick={(e) => {
+        e.stopPropagation();
+        props.onClick();
+      }}
+    >
+      <FiberManualRecordIcon sx={{ fontSize: 16 }} />
+    </IconButton>
+  );
+}
+
+
 // Rich menu item (used in menu-rich mode)
 function RichMenuItem(props: {
   name: React.ReactNode;
@@ -67,6 +87,7 @@ function RichMenuItem(props: {
   delay?: number;
   disabled?: boolean;
   color?: ColorPaletteProp;
+  endAction?: React.ReactNode;
 }) {
   return (
     <MenuItem
@@ -89,6 +110,11 @@ function RichMenuItem(props: {
           {props.description}
         </Box>
       </Box>
+      {props.endAction && (
+        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center' }}>
+          {props.endAction}
+        </Box>
+      )}
     </MenuItem>
   );
 }
@@ -107,7 +133,7 @@ function AutoDownloadToggle(props: { delay?: number }) {
 
   return <>
 
-    <Divider sx={{ my: 0.5 }} />
+    <ListDivider inset='gutter' sx={{ my: 1 }} />
 
     <ListItem
       sx={{
@@ -158,6 +184,7 @@ function AttachmentSources(props: {
   mode: 'menu-compact' | 'menu-rich' | 'inline-buttons' | 'menu-message',
   color?: ColorPaletteProp, // menu-rich and inline-buttons
   richButtonStandOut?: boolean, // menu-rich only
+  menuButton?: React.ReactNode, // custom MenuButton trigger for menu-compact/menu-message modes
   // source availability - note that hasGoogleDriveCapability is local
   canBrowse: boolean, // whether browsing is available (for Web button and showing the auto-attach toggle)
   hasCamera: boolean,
@@ -172,6 +199,11 @@ function AttachmentSources(props: {
   onOpenCamera: () => void,
   onOpenGoogleDrivePicker?: () => void, // optional because requires additional external setup (e.g. user-storage of tokens)
   onOpenWebInput: () => void,
+  // live feeds - end action buttons (presence if the callback is set, active state if the boolean is true)
+  hasActiveCameraFeed?: boolean,
+  hasActiveScreenFeed?: boolean,
+  onStartLiveCameraFeed?: () => void,
+  onStartLiveScreenFeed?: () => void,
 }) {
 
   // state (screen capture - used in menu modes where the component handles the capture)
@@ -240,7 +272,7 @@ function AttachmentSources(props: {
     return <>
 
       <Dropdown>
-        {!isMessage ? (
+        {props.menuButton ? props.menuButton : !isMessage ? (
           <MenuButton slots={{ root: IconButton }}>
             <AddRoundedIcon />
           </MenuButton>
@@ -299,7 +331,15 @@ function AttachmentSources(props: {
             //   <ListItemDecorator><ScreenshotMonitorIcon /></ListItemDecorator>
             //   Screen
             // </MenuItem>
-            <RichMenuItem name='Screen' description={screenCaptureError ? `Error: ${screenCaptureError}` : 'Capture windows, tabs, or screens'} color={screenCaptureError ? 'danger' : props.color} icon={<ScreenshotMonitorIcon />} onClick={handleTakeScreenCapture} disabled={capturingScreen} />
+            <RichMenuItem
+              name='Screen'
+              color={screenCaptureError ? 'danger' : props.color}
+              description={screenCaptureError ? `Error: ${screenCaptureError}` : 'Capture tabs, apps, and screens'}
+              icon={<ScreenshotMonitorIcon />}
+              disabled={capturingScreen}
+              onClick={handleTakeScreenCapture}
+              endAction={!isMessage && props.onStartLiveScreenFeed && <LiveFeedButton isActive={!!props.hasActiveScreenFeed} onClick={props.onStartLiveScreenFeed} />}
+            />
           )}
 
           {/* Camera */}
@@ -308,7 +348,14 @@ function AttachmentSources(props: {
             //   <ListItemDecorator><CameraAltOutlinedIcon /></ListItemDecorator>
             //   Camera
             // </MenuItem>
-            <RichMenuItem name='Camera' description='Capture photos and optional OCR' color={props.color} icon={<CameraAltOutlinedIcon />} onClick={props.onOpenCamera} />
+            <RichMenuItem
+              name='Camera'
+              color={props.color}
+              icon={<CameraAltOutlinedIcon />}
+              description='Capture photos with optional OCR'
+              onClick={props.onOpenCamera}
+              endAction={!isMessage && props.onStartLiveCameraFeed && <LiveFeedButton isActive={!!props.hasActiveCameraFeed} onClick={props.onStartLiveCameraFeed} />}
+            />
           )}
 
         </Menu>
@@ -412,25 +459,51 @@ function AttachmentSources(props: {
           <RichMenuItem
             name='Clipboard'
             icon={<ContentPasteGoIcon />}
-            description='Auto-converts images and text to the best format'
+            // description='Auto-converts images and text to the best format'
+            description='Auto-adapts images and text'
             onClick={props.onAttachClipboard}
             delay={0.06}
           />
         )}
 
+        {/*{!props.onlyImages && props.canBrowse && (*/}
+        {/*  <ListItem>*/}
+        {/*    <ListItemDecorator />*/}
+        {/*    <Checkbox*/}
+        {/*      size='sm'*/}
+        {/*      color='neutral'*/}
+        {/*      // checked={enableComposerAttach}*/}
+        {/*      // onChange={handleToggle}*/}
+        {/*      onClick={(event) => event.stopPropagation()}*/}
+        {/*      sx={{ ml: 0.375 }}*/}
+        {/*      slotProps={{*/}
+        {/*        label: {*/}
+        {/*          sx: {*/}
+        {/*            fontSize: 'sm',*/}
+        {/*            fontWeight: 'md',*/}
+        {/*          },*/}
+        {/*        },*/}
+        {/*      }}*/}
+        {/*      label='Download and attach links'*/}
+        {/*    />*/}
+        {/*  </ListItem>*/}
+        {/*)}*/}
+
+
         {/* Divider before labs features */}
-        {(props.hasScreenCapture || props.hasCamera) && <Divider sx={{ my: 0.5 }} />}
+        {(props.hasScreenCapture || props.hasCamera) && <ListDivider inset='gutter' sx={{ my: 1 }} />}
 
         {/* Screen Capture */}
         {props.hasScreenCapture && (
           <RichMenuItem
             name='Screen'
             icon={<ScreenshotMonitorIcon />}
-            description={screenCaptureError ? `Error: ${screenCaptureError}` : 'Capture windows, tabs, or screens'}
+            description={screenCaptureError ? `Error: ${screenCaptureError}` : 'Capture tabs, apps, and screens'}
             onClick={handleTakeScreenCapture}
             disabled={capturingScreen}
             color={screenCaptureError ? 'danger' : undefined}
             delay={0.08}
+            endAction={props.onStartLiveScreenFeed && <LiveFeedButton isActive={!!props.hasActiveScreenFeed} onClick={props.onStartLiveScreenFeed} />}
           />
         )}
 
@@ -439,9 +512,10 @@ function AttachmentSources(props: {
           <RichMenuItem
             name='Camera'
             icon={<CameraAltOutlinedIcon />}
-            description='Capture photos with optional text recognition'
+            description='Capture photos with optional OCR'
             onClick={props.onOpenCamera}
             delay={0.1}
+            endAction={props.onStartLiveCameraFeed && <LiveFeedButton isActive={!!props.hasActiveCameraFeed} onClick={props.onStartLiveCameraFeed} />}
           />
         )}
 

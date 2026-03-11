@@ -1,6 +1,8 @@
 import * as React from 'react';
 import type { FileWithHandle } from 'browser-fs-access';
 
+import type { CameraCaptureDialogOptions } from '~/common/components/camera/useCameraCaptureDialog';
+import type { CameraLiveStream } from '~/common/components/camera/useCameraCapture';
 import { addSnackbar } from '~/common/components/snackbar/useSnackbarsStore';
 import { useCameraCaptureDialog } from '~/common/components/camera/useCameraCaptureDialog';
 
@@ -11,7 +13,7 @@ import { useWebAttachmentModal } from './useWebAttachmentModal';
 // Focused hooks that bridge `useAttachmentDrafts` return values to UI callback shapes.
 // Each hook wraps one attachment source. Consumers compose only what they need.
 
-type _HandleCameraOpen = () => Promise<void>;
+type _HandleCameraOpen = (options?: CameraCaptureDialogOptions) => Promise<void>;
 type _HandleFiles = (files: FileWithHandle[], errorMessage: string | null) => void;
 type _HandlePasteIntercept = (event: React.ClipboardEvent) => void;
 type _HandleScreenCapture = (file: File) => void;
@@ -19,20 +21,33 @@ type _HandleWebLinks = (links: { url: string }[]) => void;
 
 
 /**
- * Returns a handler that opens the camera capture dialog and appends the captured file.
+ * Returns a handler that opens the camera capture dialog and appends the captured files.
  */
-export function useAttachHandler_CameraOpen(attachAppendFile: AttachmentDraftsApi['attachAppendFile']) {
+export function useAttachHandler_CameraOpen(
+  attachAppendFile: AttachmentDraftsApi['attachAppendFile'],
+  handleLiveStream?: (stream: CameraLiveStream) => void,
+): _HandleCameraOpen {
 
   // external state
   const { openCameraCapture } = useCameraCaptureDialog(); // -> showPromisedOverlay
 
-  return React.useCallback<_HandleCameraOpen>(async () => {
+  return React.useCallback(async (optionsOrEvent?: CameraCaptureDialogOptions | React.SyntheticEvent) => {
 
-    const imageFile = await openCameraCapture();
-    if (imageFile)
+    // guard: onClick handlers pass the event as first arg
+    const options = optionsOrEvent && 'nativeEvent' in optionsOrEvent ? undefined : optionsOrEvent;
+
+    const result = await openCameraCapture({ allowMultiCapture: true, allowLiveFeed: !!handleLiveStream, ...options });
+    if (!result) return; // user dismissed the dialog without capturing anything
+
+    // append all captured images
+    for (const imageFile of result.images)
       void attachAppendFile('camera', imageFile);
 
-  }, [openCameraCapture, attachAppendFile]);
+    // handle live stream if provided
+    if (result.liveStream)
+      handleLiveStream?.(result.liveStream);
+
+  }, [attachAppendFile, handleLiveStream, openCameraCapture]);
 }
 
 /**
