@@ -3,7 +3,7 @@ import { addDBImageAsset } from '~/common/stores/blob/dblobs-portability';
 import type { DMessageGenerator } from '~/common/stores/chat/chat.message';
 import type { MaybePromise } from '~/common/types/useful.types';
 import { convert_Base64WithMimeType_To_Blob } from '~/common/util/blobUtils';
-import { create_CodeExecutionInvocation_ContentFragment, create_CodeExecutionResponse_ContentFragment, create_FunctionCallInvocation_ContentFragment, createAnnotationsVoidFragment, createDMessageDataRefDBlob, createDVoidWebCitation, createErrorContentFragment, createModelAuxVoidFragment, createPlaceholderVoidFragment, createTextContentFragment, createZyncAssetReferenceContentFragment, DMessageErrorPart, DVoidModelAuxPart, DVoidPlaceholderModelOp, isContentFragment, isModelAuxPart, isTextContentFragment, isVoidAnnotationsFragment, isVoidFragment, isVoidPlaceholderFragment } from '~/common/stores/chat/chat.fragments';
+import { create_CodeExecutionInvocation_ContentFragment, create_CodeExecutionResponse_ContentFragment, create_FunctionCallInvocation_ContentFragment, createAnnotationsVoidFragment, createDMessageDataRefDBlob, createDVoidWebCitation, createErrorContentFragment, createModelAuxVoidFragment, createPlaceholderVoidFragment, createTextContentFragment, createZyncAssetReferenceContentFragment, DMessageErrorPart, DVoidModelAuxPart, DVoidPlaceholderMOp, isContentFragment, isModelAuxPart, isTextContentFragment, isVoidAnnotationsFragment, isVoidFragment, isVoidPlaceholderFragment } from '~/common/stores/chat/chat.fragments';
 import { ellipsizeMiddle } from '~/common/util/textUtils';
 import { imageBlobTransform, PLATFORM_IMAGE_MIMETYPE } from '~/common/util/imageUtils';
 import { metricsFinishChatGenerateLg, metricsPendChatGenerateLg } from '~/common/stores/metrics/metrics.chatgenerate';
@@ -19,10 +19,53 @@ import { aixClassifyReassemblyError } from './aix.client.errors';
 
 
 // configuration
+const DEBUG_FLOW = false; // logs client-side checkpoint/retry/continuation flow control
 const GENERATED_IMAGES_CONVERT_TO_COMPRESSED = true; // converts PNG to WebP or JPEG to save IndexedDB space
 const GENERATED_IMAGES_COMPRESSION_QUALITY = 0.98;
-const ELLIPSIZE_DEV_ISSUE_MESSAGES = 4096;
+const ELLIPSIZE_DEV_ISSUE_MESSAGES = 4096; // for _appendReassemblyDevError
 const MERGE_ISSUES_INTO_TEXT_PART_IF_OPEN = false; // 2025-10-10: put errors in the dedicated part
+const VP_PERSISTENCE_DELAY = 500; // persistence of vision for voidPlaceholders
+
+
+// Future: Reassembly Policies
+// type ReassemblyPolicyVoidPlaceholder =
+//   | 'ephemeral-log' // (default) when message content arrives (reasoning, text, tool calls, images, etc..), remove the last VP
+//   | 'single-log-end' // move the VP to the end to have a single large log of operations
+//   | 'interleaved-log' // batch VP OPs, but interleave them with the other content
+//   ;
+
+
+/**
+ * Extended accumulator - adds reassembly-internal state to the output accumulator so that
+ * checkpointing/restore is atomic. The `_`-prefixed fields are internal to ContentReassembler;
+ * external code should treat this as AixChatGenerateContent_LL (structural subtype).
+ */
+type ReassemblerAccumulator = AixChatGenerateContent_LL & {
+  /** Cursor: index of the open text fragment for appending, or null if none is open */
+  _textFragmentIndex: number | null;
+
+  /** Raw termination data from wire or client-side - classified at finalization */
+  _terminationReason: 'done-client-aborted' | 'issue-client-rpc' | AixWire_Particles.CGEndReason | undefined;
+  /** Raw token stop reason from the wire `end` particle */
+  _tokenStopReasonWire: AixWire_Particles.GCTokenStopReason | undefined;
+};
+
+/** Single source of truth for the initial/blank accumulator state - all fields explicit. */
+function _createEmptyAccumulatorState(): ReassemblerAccumulator {
+  return {
+    // AixChatGenerateContent_LL fields
+    fragments: [],
+    genMetricsLg: undefined,
+    genModelName: undefined,
+    genProviderInfraLabel: undefined,
+    genUpstreamHandle: undefined,
+    legacyGenTokenStopReason: undefined,
+    // reassembly-internal fields
+    _textFragmentIndex: null,
+    _terminationReason: undefined,
+    _tokenStopReasonWire: undefined,
+  };
+}
 
 
 /**
@@ -37,19 +80,17 @@ export class ContentReassembler {
   private readonly wireParticlesBacklog: AixWire_Particles.ChatGenerateOp[] = [];
   private isProcessing = false;
   private processingPromise = Promise.resolve();
-  private hadErrorInWireReassembly = false;
 
-  // reassembly state (plus the ext. accumulator)
-  private currentTextFragmentIndex: number | null = null;
+  // owned accumulation state - coherent and with checkpointing support
+  readonly accumulator: ReassemblerAccumulator = _createEmptyAccumulatorState();
+  private checkpointSnapshot: undefined | ReassemblerAccumulator;
 
-  // raw termination data (set during stream or by client, classified at finalization)
-  private _terminationReason?: 'done-client-aborted' | 'issue-client-rpc' | AixWire_Particles.CGEndReason;
-  private _tokenStopReasonWire?: AixWire_Particles.GCTokenStopReason;
+  // settable per-iteration callback
+  private onAccumulatorUpdated?: (accumulator: AixChatGenerateContent_LL, hasContent: boolean) => MaybePromise<void>;
+  private updateContentStarted = false; // true (forever) after the first update with content, even if we have resets/continuations in the future
 
 
   constructor(
-    private readonly accumulator: AixChatGenerateContent_LL,
-    private readonly onAccumulatorUpdated?: () => MaybePromise<void>,
     inspectorTransport?: AixClientDebugger.Transport,
     inspectorContext?: AixClientDebugger.Context,
     private readonly skipImageCompression?: boolean,
@@ -57,9 +98,13 @@ export class ContentReassembler {
     private readonly onInlineAudio?: (audio: { blob: Blob; mimeType: string; label: string; durationMs?: number }) => void,
   ) {
 
-    // [SUDO] Debugging the request, last-write-wins for the global (displayed in the UI)
+    // [AI Inspector] Debugging the request, last-write-wins for the global (displayed in the UI)
     this.debuggerFrameId = !inspectorContext ? null : aixClientDebugger_init(inspectorTransport ?? 'trpc', inspectorContext);
 
+  }
+
+  set updateCallback(callback: typeof this.onAccumulatorUpdated) {
+    this.onAccumulatorUpdated = callback;
   }
 
 
@@ -94,11 +139,33 @@ export class ContentReassembler {
     // Classify termination
     this.accumulator.legacyGenTokenStopReason = this._deriveTokenStopReason();
 
+
+    // Fragment finalization heuristics:
+
+    // - remove placeholders for clean exists, leave them for issues or client-aborts
+    if (this.accumulator._terminationReason === 'done-dialect')
+      this._removeAllVoidPlaceholders(); // [PH-LIFECYCLE]
+
+    // - mark as completed or errored
+    for (const fragment of this.accumulator.fragments)
+      if (isVoidPlaceholderFragment(fragment) && fragment.part.opLog?.length)
+        for (const entry of fragment.part.opLog) {
+          if (entry.text?.endsWith('...')) entry.text = entry.text.slice(0, -3);
+          if (entry.state === 'active') {
+            entry.state = 'error';
+            entry.oTexts = [...(entry.oTexts || []), `Terminated with reason: ${this.accumulator._terminationReason ?? 'unknown'}`];
+          }
+        }
+
+    // - fuse adjacent same-type fragments that were kept separate across continuation turns
+    // NOTE: not needed because of precise snapshotting and restoration, and upstream guarantees about completeness of fragments
+
+
     // Metrics
     const hadIssues = !!this.accumulator.legacyGenTokenStopReason;
     metricsFinishChatGenerateLg(this.accumulator.genMetricsLg, hadIssues);
 
-    // [SUDO] Debugging, finalize the frame
+    // [AI Inspector] Debugging, finalize the frame
     if (this.debuggerFrameId)
       aixClientDebugger_completeFrame(this.debuggerFrameId);
 
@@ -111,11 +178,11 @@ export class ContentReassembler {
 
     // normal user cancellation does not require error fragments
 
-    if (this._terminationReason)
-      console.warn(`⚠️ [ContentReassembler] setClientAborted: overriding server termination '${this._terminationReason}' (wire stop: ${this._tokenStopReasonWire ?? 'none'})`);
+    if (this.accumulator._terminationReason)
+      console.warn(`⚠️ [ContentReassembler] setClientAborted: overriding server termination '${this.accumulator._terminationReason}' (wire stop: ${this.accumulator._tokenStopReasonWire ?? 'none'})`);
 
-    this._terminationReason = 'done-client-aborted';
-    this._tokenStopReasonWire = undefined; // reset, as we assume we can't know (alt: jsut leave it)
+    this.accumulator._terminationReason = 'done-client-aborted';
+    this.accumulator._tokenStopReasonWire = undefined; // reset, as we assume we can't know (alt: jsut leave it)
   }
 
   setClientExcepted(errorAsText: string, errorHint?: DMessageErrorPart['hint']): void {
@@ -125,21 +192,22 @@ export class ContentReassembler {
     // add the error fragment with the given message
     this._appendErrorFragment(errorAsText, errorHint);
 
-    if (this._terminationReason)
-      console.warn(`⚠️ [ContentReassembler] setClientExcepted: overriding server termination '${this._terminationReason}' (wire stop: ${this._tokenStopReasonWire ?? 'none'})`);
+    if (this.accumulator._terminationReason)
+      console.warn(`⚠️ [ContentReassembler] setClientExcepted: overriding server termination '${this.accumulator._terminationReason}' (wire stop: ${this.accumulator._tokenStopReasonWire ?? 'none'})`);
 
-    this._terminationReason = 'issue-client-rpc';
-    this._tokenStopReasonWire = undefined; // reset, as we can't assume we know (alt: jsut leave it)
+    this.accumulator._terminationReason = 'issue-client-rpc';
+    this.accumulator._tokenStopReasonWire = undefined; // reset, as we can't assume we know (alt: jsut leave it)
   }
 
   async setClientRetrying(strategy: 'reconnect' | 'resume', errorMessage: string, attempt: number, maxAttempts: number, delayMs: number, causeHttp?: number, causeConn?: string) {
     if (DEBUG_PARTICLES)
       console.log(`-> aix.p: client-retry (${strategy})`, { errorMessage, attempt, maxAttempts, delayMs, causeHttp, causeConn });
 
-    // process as retry-reset with cli-ll scope
-    this.onRetryReset({
-      cg: 'retry-reset', rScope: 'cli-ll',
-      rShallClear: false, // TODO: check if this is correct; we shall clear, but at the same time we haven't tried to see
+    // process as aix-retry-reset with cli-ll scope
+    this.onAixRetryReset({
+      cg: 'aix-retry-reset', rScope: 'cli-ll',
+      rClearStrategy: strategy === 'reconnect' ? 'all' // client starts from scratch, clear everything
+        : 'none', // [resume]: TODO: UNVERIFIED - keep everything assuming the next streaming is incremental (akin to the server-side continuation?)
       reason: strategy === 'resume' ? `Resuming - ${errorMessage}` : `Reconnecting - ${errorMessage}`,
       attempt, maxAttempts, delayMs, causeHttp, causeConn,
     });
@@ -153,8 +221,6 @@ export class ContentReassembler {
     if (this.isProcessing || !this.#hasBacklog) return;
     // require not external abort
     if (this.#wireIsAborted) return;
-    // require not former processing errors
-    if (this.hadErrorInWireReassembly) return;
 
     this.isProcessing = true;
 
@@ -178,7 +244,7 @@ export class ContentReassembler {
         await this.#reassembleParticle(particle);
 
         // signal all updates
-        await this.onAccumulatorUpdated?.();
+        await this.onAccumulatorUpdated?.(this.accumulator, this.updateContentStarted ||= this.accumulator.fragments.length > 0);
 
       }
 
@@ -194,7 +260,7 @@ export class ContentReassembler {
       const { errorMessage } = aixClassifyReassemblyError(error, showAsBold);
 
       this._appendReassemblyDevError(errorMessage, true);
-      await this.onAccumulatorUpdated?.()?.catch(console.error);
+      await this.onAccumulatorUpdated?.(this.accumulator, this.updateContentStarted ||= true)?.catch(console.error);
 
     } finally {
 
@@ -217,20 +283,19 @@ export class ContentReassembler {
   /// Particle Reassembly ///
 
   async #reassembleParticle(op: AixWire_Particles.ChatGenerateOp): Promise<void> {
-
-    // remove trailing placeholder if any other content except heartbeat or void-placeholder
-    if (!('p' in op) || !(op.p === '❤' || op.p === 'vp'))
-      this.removeTrailingPlaceholder();
-
     switch (true) {
 
       // TextParticleOp
       case 't' in op:
+        await this._removeLastVoidPlaceholderDelayed();
         this.onAppendText(op);
         break;
 
       // PartParticleOp
       case 'p' in op:
+        // heuristics to remove the placeholder if real user-destined content arrives
+        if (op.p !== '❤' && op.p !== 'vp' && op.p !== 'urlc' && op.p !== 'svs')
+          await this._removeLastVoidPlaceholderDelayed();
         switch (op.p) {
           case '❤':
             // ignore the heartbeats
@@ -269,7 +334,7 @@ export class ContentReassembler {
             this.onAddUrlCitation(op);
             break;
           case 'vp':
-            this.onAppendVoidPlaceholder(op);
+            this.onSetOperationState(op);
             break;
           default:
             // noinspection JSUnusedLocalSymbols
@@ -295,8 +360,20 @@ export class ContentReassembler {
           case 'issue':
             this.onCGIssue(op);
             break;
-          case 'retry-reset':
-            this.onRetryReset(op);
+          case 'aix-info':
+            if (op.ait === 'flow-cont') {
+              // break text accumulation - to reflect upstream's clean breaks of content blocks
+              this.accumulator._textFragmentIndex = null;
+              // Continuation checkpoint: create a snapshot now
+              this.checkpointSnapshot = structuredClone(this.accumulator);
+              if (DEBUG_FLOW) console.log(`[DEV] [flow] checkpoint created: ${this.accumulator.fragments.length} fragments snapshotted`);
+            } else
+              await this._removeLastVoidPlaceholderDelayed();
+            this.onAixInfo(op); // creates a voidPlaceholder
+            break;
+          case 'aix-retry-reset':
+            await this._removeLastVoidPlaceholderDelayed();
+            this.onAixRetryReset(op); // creates a voidPlaceholder
             break;
           case 'set-metrics':
             this.onMetrics(op);
@@ -331,7 +408,7 @@ export class ContentReassembler {
   private onAppendText(particle: AixWire_Particles.TextParticleOp): void {
 
     // add to existing TextContentFragment
-    const currentTextFragment = this.currentTextFragmentIndex !== null ? this.accumulator.fragments[this.currentTextFragmentIndex] : null;
+    const currentTextFragment = this.accumulator._textFragmentIndex !== null ? this.accumulator.fragments[this.accumulator._textFragmentIndex] : null;
     if (currentTextFragment && isTextContentFragment(currentTextFragment)) {
       currentTextFragment.part.text += particle.t;
       return;
@@ -340,13 +417,13 @@ export class ContentReassembler {
     // new TextContentFragment
     const newTextFragment = createTextContentFragment(particle.t);
     this.accumulator.fragments.push(newTextFragment);
-    this.currentTextFragmentIndex = this.accumulator.fragments.length - 1;
+    this.accumulator._textFragmentIndex = this.accumulator.fragments.length - 1;
 
   }
 
   private onAppendReasoningText({ _t, restart }: Extract<AixWire_Particles.PartParticleOp, { p: 'tr_' }>): void {
     // Break text accumulation
-    this.currentTextFragmentIndex = null;
+    this.accumulator._textFragmentIndex = null;
 
     // append to existing ModelAuxVoidFragment if possible
     const currentFragment = this.accumulator.fragments[this.accumulator.fragments.length - 1];
@@ -394,7 +471,7 @@ export class ContentReassembler {
 
   private onStartFunctionCallInvocation(fci: Extract<AixWire_Particles.PartParticleOp, { p: 'fci' }>): void {
     // Break text accumulation
-    this.currentTextFragmentIndex = null;
+    this.accumulator._textFragmentIndex = null;
     // Start FC accumulation
     const fragment = create_FunctionCallInvocation_ContentFragment(
       fci.id,
@@ -423,18 +500,18 @@ export class ContentReassembler {
 
   private onAddCodeExecutionInvocation(cei: Extract<AixWire_Particles.PartParticleOp, { p: 'cei' }>): void {
     this.accumulator.fragments.push(create_CodeExecutionInvocation_ContentFragment(cei.id, cei.language, cei.code, cei.author));
-    this.currentTextFragmentIndex = null;
+    this.accumulator._textFragmentIndex = null;
   }
 
   private onAddCodeExecutionResponse(cer: Extract<AixWire_Particles.PartParticleOp, { p: 'cer' }>): void {
     this.accumulator.fragments.push(create_CodeExecutionResponse_ContentFragment(cer.id, cer.error, cer.result, cer.executor, cer.environment));
-    this.currentTextFragmentIndex = null;
+    this.accumulator._textFragmentIndex = null;
   }
 
   private async onAppendInlineAudio(particle: Extract<AixWire_Particles.PartParticleOp, { p: 'ia' }>): Promise<void> {
 
     // Break text accumulation, as we have a full audio part in the middle
-    this.currentTextFragmentIndex = null;
+    this.accumulator._textFragmentIndex = null;
 
     const { mimeType, a_b64: base64Data, label, /*generator,*/ durationMs } = particle;
     const safeLabel = label || 'Generated Audio';
@@ -498,9 +575,9 @@ export class ContentReassembler {
   private async onAppendInlineImage(particle: Extract<AixWire_Particles.PartParticleOp, { p: 'ii' }>): Promise<void> {
 
     // Break text accumulation, as we have a full image part in the middle
-    this.currentTextFragmentIndex = null;
+    this.accumulator._textFragmentIndex = null;
 
-    let { i_b64: inputBase64, mimeType: inputType, label, generator, prompt } = particle;
+    let { i_b64: inputBase64, mimeType: inputType, label, generator, prompt, hintSkipResize } = particle;
     const safeLabel = label || 'Generated Image';
 
     try {
@@ -509,7 +586,7 @@ export class ContentReassembler {
       let inputImage = await convert_Base64WithMimeType_To_Blob(inputBase64, inputType, 'ContentReassembler.onAppendInlineImage');
 
       // perform resize/type conversion if desired, and find the image dimensions
-      const shallConvert = GENERATED_IMAGES_CONVERT_TO_COMPRESSED && !this.skipImageCompression && inputType === 'image/png';
+      const shallConvert = GENERATED_IMAGES_CONVERT_TO_COMPRESSED && !this.skipImageCompression && !hintSkipResize && inputType === 'image/png';
       const { blob: imageBlob, height: imageHeight, width: imageWidth } = await imageBlobTransform(inputImage, {
         convertToMimeType: shallConvert ? PLATFORM_IMAGE_MIMETYPE : undefined,
         convertToLossyQuality: GENERATED_IMAGES_COMPRESSION_QUALITY,
@@ -588,34 +665,77 @@ export class ContentReassembler {
 
     }
 
-    // Important: Don't reset currentTextFragmentIndex to allow text to continue
+    // Important: Don't reset _textFragmentIndex to allow text to continue
     // This ensures we don't interrupt the text flow
   }
 
-  private onAppendVoidPlaceholder(vp: Extract<AixWire_Particles.PartParticleOp, { p: 'vp' }>): void {
-    const { text, mot } = vp;
+  private onSetOperationState(os: Extract<AixWire_Particles.PartParticleOp, { p: 'vp' }>): void {
 
-    // update the model op
-    const modelOp: DVoidPlaceholderModelOp = { mot, cts: Date.now() };
+    // This operation does not require removal of existing VoidPlaceholder fragments, as it recycles the last one if any
 
-    const fragments = this.accumulator.fragments;
+    // destructure
+    const { text, mot, opId, state, parentOpId, iTexts, oTexts } = os;
 
-    // Reuse existing trailing placeholder (rapid vp updates reuse rather than accumulate)
-    if (fragments.length > 0) {
-      const lastFragment = fragments[fragments.length - 1];
-      if (isVoidPlaceholderFragment(lastFragment)) {
-        lastFragment.part.pText = text;
-        lastFragment.part.modelOp = modelOp;
-        return;
-      }
+    const existingPh = this.accumulator.fragments.findLast(isVoidPlaceholderFragment);
+    if (!existingPh) {
+
+      // New placeholder with initial opLog entry (root level = 0)
+      this.accumulator.fragments.push(createPlaceholderVoidFragment(text, undefined, undefined, [{
+        opId,
+        text,
+        mot,
+        state: state ?? 'active',
+        ...iTexts ? { iTexts } : undefined,
+        ...oTexts ? { oTexts } : undefined,
+        ...parentOpId ? { parentOpId } : undefined,
+        level: 0,
+        cts: Date.now(),
+      }]));
+
+      // Placeholders don't affect text fragment indexing (push to end doesn't shift existing indices)
+      // NOTE: we could have placeholders breaking text accumulation into new fragments with `this.accumulator._textFragmentIndex = null;`, however
+      // since placeholders are used a lot with hosted tool calls, this could lead to way too many fragments being created
+      return;
     }
 
-    // Append new placeholder at end - temporal ordering preserved
-    fragments.push(createPlaceholderVoidFragment(text, undefined, modelOp));
+    // Accumulate into existing placeholder
+    const part = existingPh.part;
 
-    // Placeholders don't affect text fragment indexing (push to end doesn't shift existing indices)
-    // NOTE: we could have placeholders breaking text accumulation into new fragments with `this.currentTextFragmentIndex = null;`, however
-    // since placeholders are used a lot with hosted tool calls, this could lead to way too many fragments being created
+    // Takeover: operations supersede other placeholder types
+    delete part.pType;
+    delete part.aixControl;
+
+    // mutable cast: accumulator fragments are not from an immutable store
+    const opLog = (part.opLog ?? (part.opLog = [])) as DVoidPlaceholderMOp[];
+
+    // existing opId in opLog
+    const entry = opLog.find(e => e.opId === opId);
+    if (entry) {
+      // update existing operation in place
+      if (text) entry.text = text;
+      if (state) entry.state = state;
+      if (iTexts) entry.iTexts = iTexts;
+      if (oTexts) entry.oTexts = oTexts;
+    } else {
+      // append new operation - infer level from parent's level (or 0)
+      const level = !parentOpId ? 0 : 1 + (opLog.find(e => e.opId === parentOpId)?.level ?? 0);
+      opLog.push({
+        opId,
+        mot,
+        text,
+        state: state ?? 'active',
+        ...iTexts ? { iTexts } : undefined,
+        ...oTexts ? { oTexts } : undefined,
+        ...parentOpId ? { parentOpId } : undefined,
+        level,
+        cts: Date.now(),
+      });
+    }
+
+    // Top-level pText reflects latest active (or last if all done)
+    const latest = opLog.findLast(e => e.state === 'active') ?? opLog[opLog.length - 1];
+    part.pText = latest.text;
+
   }
 
   private onSetVendorState(vs: Extract<AixWire_Particles.PartParticleOp, { p: 'svs' }>): void {
@@ -634,12 +754,37 @@ export class ContentReassembler {
     };
   }
 
-  // helper to remove trailing placeholder when real content arrives
-  private removeTrailingPlaceholder(): void {
+  private _removeAllVoidPlaceholders(): void {
     const fragments = this.accumulator.fragments;
-    if (fragments.length > 0 && isVoidPlaceholderFragment(fragments[fragments.length - 1]))
-      fragments.pop(); // Remove trailing placeholder
+    for (let i = fragments.length - 1; i >= 0; i--)
+      if (isVoidPlaceholderFragment(fragments[i])) {
+        fragments.splice(i, 1);
+        if (this.accumulator._textFragmentIndex !== null && this.accumulator._textFragmentIndex > i)
+          this.accumulator._textFragmentIndex--;
+      }
   }
+
+  private async _removeLastVoidPlaceholderDelayed(): Promise<boolean> {
+    const fragments = this.accumulator.fragments;
+    const idx = fragments.findLastIndex(isVoidPlaceholderFragment);
+    if (idx < 0) return false;
+    // delay before removal
+    await new Promise(resolve => setTimeout(resolve, VP_PERSISTENCE_DELAY));
+    fragments.splice(idx, 1);
+    if (this.accumulator._textFragmentIndex !== null && this.accumulator._textFragmentIndex > idx)
+      this.accumulator._textFragmentIndex--;
+    return true;
+  }
+
+  // private removeLastVoidPlaceholder(): boolean {
+  //   const fragments = this.accumulator.fragments;
+  //   const idx = fragments.findLastIndex(isVoidPlaceholderFragment);
+  //   if (idx < 0) return false;
+  //   fragments.splice(idx, 1);
+  //   if (this.accumulator._textFragmentIndex !== null && this.accumulator._textFragmentIndex > idx)
+  //     this.accumulator._textFragmentIndex--;
+  //   return true;
+  // }
 
 
   /// Rest of the data ///
@@ -648,8 +793,8 @@ export class ContentReassembler {
    * Stores raw termination data from the wire - classification deferred to finalizeAccumulator()
    */
   private onCGEnd({ terminationReason, tokenStopReason }: Extract<AixWire_Particles.ChatGenerateOp, { cg: 'end' }>): void {
-    this._terminationReason = terminationReason;
-    this._tokenStopReasonWire = tokenStopReason;
+    this.accumulator._terminationReason = terminationReason;
+    this.accumulator._tokenStopReasonWire = tokenStopReason;
   }
 
   /**
@@ -657,12 +802,12 @@ export class ContentReassembler {
    * Called once at finalization - the single place where wire-level → UI-level classification happens.
    */
   private _deriveTokenStopReason(): DMessageGenerator['tokenStopReason'] | undefined {
-    const wire = this._tokenStopReasonWire;
+    const wire = this.accumulator._tokenStopReasonWire;
 
     // First handle client terminations
-    if (this._terminationReason === 'done-client-aborted')
+    if (this.accumulator._terminationReason === 'done-client-aborted')
       return 'client-abort'; // client-side abort is a 'successful' termination with an incomplete message
-    if (this._terminationReason === 'issue-client-rpc') {
+    if (this.accumulator._terminationReason === 'issue-client-rpc') {
       // error fragment already appended
       // issue on the client-side, such as interrupted server connection
       return 'issue';
@@ -674,7 +819,6 @@ export class ContentReassembler {
         // normal completions
         'ok': undefined,
         'ok-tool_invocations': undefined,
-        'ok-pause_continue': undefined,
         // issues: dialect, dispatch, or client
         'cg-issue': 'issue',
         // interruptions
@@ -689,7 +833,7 @@ export class ContentReassembler {
     }
 
     // fall back to terminationReason
-    switch (this._terminationReason) {
+    switch (this.accumulator._terminationReason) {
       case undefined:
         // SEVERE - AIX BUG: don't even know why we terminated
         console.warn(`⚠️ [ContentReassembler] finished without 'terminationReason' - possible missing 'end' particle. No tokenStopReason can be derived.`);
@@ -720,8 +864,8 @@ export class ContentReassembler {
         return 'issue';
 
       default:
-        const _exhaustiveCheck: never = this._terminationReason;
-        console.warn(`⚠️ [ContentReassembler] unmapped termination reason: ${this._terminationReason} - no tokenStopReason can be derived.`);
+        const _exhaustiveCheck: never = this.accumulator._terminationReason;
+        console.warn(`⚠️ [ContentReassembler] unmapped termination reason: ${this.accumulator._terminationReason} - no tokenStopReason can be derived.`);
         return undefined;
     }
   }
@@ -730,8 +874,8 @@ export class ContentReassembler {
     // NOTE: not sure I like the flow at all here
     // there seem to be some bad conditions when issues are raised while the active part is not text
     if (MERGE_ISSUES_INTO_TEXT_PART_IF_OPEN) {
-      const currentTextFragment = this.currentTextFragmentIndex === null ? null
-        : this.accumulator.fragments[this.currentTextFragmentIndex];
+      const currentTextFragment = this.accumulator._textFragmentIndex === null ? null
+        : this.accumulator.fragments[this.accumulator._textFragmentIndex];
       if (currentTextFragment && isTextContentFragment(currentTextFragment)) {
         currentTextFragment.part.text += (currentTextFragment.part.text ? '\n' : ' ') + issueText;
         return;
@@ -740,24 +884,48 @@ export class ContentReassembler {
     this._appendErrorFragment(issueText, issueHint);
   }
 
-  private onRetryReset({ rScope, rShallClear, attempt, maxAttempts, delayMs, reason, causeHttp, causeConn }: Extract<AixWire_Particles.ChatGenerateOp, { cg: 'retry-reset' }>): void {
-    // operation-level retry likely requires a wipe
-    if (rShallClear) {
-      this.currentTextFragmentIndex = null;
-      this.accumulator.fragments = [];
-      delete this.accumulator.legacyGenTokenStopReason;
-      // reset private termination state
-      this._terminationReason = undefined;
-      this._tokenStopReasonWire = undefined;
-      // keep metrics/model/handle intact - may be useful for debugging retries
+  private onAixInfo({ ait, text }: Extract<AixWire_Particles.ChatGenerateOp, { cg: 'aix-info' }>): void {
+    // -> ph: show info
+    this.accumulator.fragments.push(createPlaceholderVoidFragment(text, undefined, {
+      ctl: 'ac-info',
+      ait: ait,
+    }));
+  }
 
-      // discard any pending particles from the failed attempt
-      this.wireParticlesBacklog.length = 0;
+  private onAixRetryReset({ rScope, rClearStrategy, attempt, maxAttempts, delayMs, reason, causeHttp, causeConn }: Extract<AixWire_Particles.ChatGenerateOp, { cg: 'aix-retry-reset' }>): void {
+    const _prevFragments = DEBUG_FLOW ? this.accumulator.fragments.length : 0;
+    switch (rClearStrategy) {
+      case 'none':
+        // keep everything (e.g. L1 connection retries - no content streamed yet)
+        if (DEBUG_FLOW) console.log(`[DEV] [flow] retry-reset ${rScope}: none (keeping ${_prevFragments} fragments) - ${reason}`);
+        break;
+
+      case 'since-checkpoint':
+        // atomic restore to checkpoint
+        if (!this.checkpointSnapshot)
+          console.warn('[ContentReassembler] since-checkpoint restore with no checkpoint - falling back to full clear');
+        Object.assign(this.accumulator, structuredClone(this.checkpointSnapshot) ?? _createEmptyAccumulatorState());
+        this.wireParticlesBacklog.length = 0; // should have been drained/completed already
+        if (DEBUG_FLOW) console.log(`[DEV] [flow] retry-reset ${rScope}: since-checkpoint (${_prevFragments} -> ${this.accumulator.fragments.length} fragments) - ${reason}`);
+        break;
+
+      case 'all':
+        // full wipe for reconnect scenarios (L4 client reconnect)
+        Object.assign(this.accumulator, _createEmptyAccumulatorState());
+        this.checkpointSnapshot = undefined;
+        this.wireParticlesBacklog.length = 0; // should have been drained/completed already
+        if (DEBUG_FLOW) console.log(`[DEV] [flow] retry-reset ${rScope}: all (${_prevFragments} -> 0 fragments, checkpoint discarded) - ${reason}`);
+        break;
+
+      default: {
+        const _exhaustiveCheck: never = rClearStrategy;
+        console.warn(`[ContentReassembler] Unknown rClearStrategy: ${rClearStrategy}`);
+      }
     }
 
     // -> ph: show retry status
-    const retryMessage = `Retrying [${attempt}/${maxAttempts}] in ${Math.round(delayMs / 1000)}s - ${reason}`;
-    this.accumulator.fragments.push(createPlaceholderVoidFragment(retryMessage, undefined, undefined, {
+    const retryMessage = `Retrying [${attempt}/${maxAttempts}] in ${Math.round(delayMs / 100) / 10}s - ${reason}`;
+    this.accumulator.fragments.push(createPlaceholderVoidFragment(retryMessage, undefined, {
       ctl: 'ec-retry',
       rScope: rScope,
       rAttempt: attempt,
@@ -805,7 +973,7 @@ export class ContentReassembler {
 
   private _appendErrorFragment(errorText: string, errorHint?: DMessageErrorPart['hint']): void {
     this.accumulator.fragments.push(createErrorContentFragment(errorText, errorHint));
-    this.currentTextFragmentIndex = null;
+    this.accumulator._textFragmentIndex = null;
   }
 
 }

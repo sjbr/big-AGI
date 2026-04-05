@@ -271,7 +271,13 @@ export namespace AnthropicWire_Blocks {
       ]),
       z.string(), // forward-compatibility parsing
     ]),
-    input: z.any(), // see the comment on ToolUseBlock_schema.input
+    input: z.union([
+      z.object({ query: z.string() }), // web_search
+      z.object({ url: z.string() }), // web_fetch
+      z.object({ code: z.string() }), // code_execution
+      z.object({ command: z.string() }), // bash_code_execution
+      // we don't know about the text_editor_code_execution and others
+    ]).or(z.any()), // see the comment on ToolUseBlock_schema.input
     caller: _ToolUseCaller_schema.optional(),
   });
 
@@ -333,6 +339,7 @@ export namespace AnthropicWire_Blocks {
         stderr: z.string(),
         return_code: z.number(),
         content: z.array(_CodeExecutionOutputBlock_schema),
+        // abort_reason: z.string().nullish(), // seen as null in responses, but undocumented - revisit if non-null values appear
       }),
       // Encrypted variant - used when code execution is combined with programmatic tool calling + web_search
       z.object({
@@ -341,6 +348,7 @@ export namespace AnthropicWire_Blocks {
         stderr: z.string(),
         return_code: z.number(),
         content: z.array(_CodeExecutionOutputBlock_schema),
+        // abort_reason: z.string().nullish(), // seen as null in responses, but undocumented - revisit if non-null values appear
       }),
       z.object({
         type: z.literal('code_execution_tool_result_error'),
