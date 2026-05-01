@@ -27,21 +27,9 @@ export interface DMessage {
 
   generator?: DMessageGenerator;      // Assistant generator info, and metrics
 
-  /**
-   * Session metadata for multi-turn agentic sessions.
-   *
-   * Enables stateful time-monotonic multi-turn interactions in a stateless architecture:
-   * - Parsers accumulate session values (container IDs, response handles, etc.)
-   * - Request builders traverse history for latest non-expired values
-   * - Child messages inherit parent session, new values override
-   *
-   * Pattern:
-   * 1. Parser extracts vendor session data → stores in sessionMetadata
-   * 2. Request builder finds latest value per key → includes in next request
-   * 3. Vendor reuses session (e.g., Anthropic container for file access, OpenAI response for reconnection)
-   *
-   * Keys namespaced by vendor: 'anthropic.container.id', 'openai.response.id'
-   */
+  // Session metadata for multi-turn agentic sessions was considered here (see commit 3cd38f47)
+  // but vendor session state (container IDs, response handles) is stored on DMessageGenerator
+  // fields instead (upstreamContainer, upstreamHandle) - simpler plumbing, no persistence migration.
   // sessionMetadata?: DMessageSessionMetadata;
 
   userFlags?: DMessageUserFlag[];     // (UI) user-set per-message flags
@@ -60,13 +48,7 @@ export type DMessageId = string;
 
 export type DMessageRole = 'user' | 'assistant' | 'system';
 
-/**
- * Session metadata carrying vendor-specific state across multi-turn agentic sessions.
- * Namespaced keys (e.g., 'anthropic.container.id'), child inherits parent, new values override.
- *
- * NOTE: may use some typescript module augmentation to plug new keys and value types here.
- * NOTE2: may add references to the parent sessions/unique Ids, although they may be the message itself
- */
+// Superseded by DMessageGenerator.upstreamContainer / .upstreamHandle - see note above.
 // export type DMessageSessionMetadata = Record<string, string | number | boolean | null>;
 
 
@@ -143,11 +125,17 @@ export type DMessageGenerator = ({
 }) & {
   metrics?: DMetricsChatGenerate_Md;   // medium-sized metrics stored in the message
   providerInfraLabel?: string;         // upstream provider that served the request (e.g., OpenRouter provider routing)
-  upstreamHandle?: {
-    uht: 'vnd.oai.responses',
-    responseId: string,
-    expiresAt: number | null,         // null = never expires
+  upstreamContainer?: {
+    uct: 'vnd.ant.container',
+    containerId: string,
+    expiresAt: string,                // ISO 8601 UTC timestamp (e.g., "2026-04-07T05:59:32Z")
   },
+  upstreamHandle?:
+    // unified `runId` across variants - vendor-specific id lives behind it; `uht` is consulted only for dispatch routing
+    // createdAt/expiresAt: server-clock (ms) at the FIRST observation for this runId - preserved across reattaches
+    // (reassembler ignores re-emissions for the same runId so retention is measured from creation, not last reattach)
+    | { uht: 'vnd.oai.responses', runId: string /* OpenAI `response.id` */, createdAt: number | null, expiresAt: number | null /* null = never expires */ }
+    | { uht: 'vnd.gem.interactions', runId: string /* Gemini `interaction.id` */, createdAt: number | null, expiresAt: number | null },
   tokenStopReason?:
     | 'client-abort'                  // if the generator stopped due to a client abort signal
     | 'filter'                        // (inline filter message injected) if the generator stopped due to a filter
@@ -249,6 +237,7 @@ export function duplicateDMessageGenerator(generator: Readonly<DMessageGenerator
         // ...(generator.xeOpCode ? { xeOpCode: generator.xeOpCode } : {}),
         ...(generator.metrics ? { metrics: { ...generator.metrics } } : {}),
         ...(generator.providerInfraLabel ? { providerInfraLabel: generator.providerInfraLabel } : {}),
+        ...(generator.upstreamContainer ? { upstreamContainer: { ...generator.upstreamContainer } } : {}),
         ...(generator.upstreamHandle ? { upstreamHandle: { ...generator.upstreamHandle } } : {}),
         ...(generator.tokenStopReason ? { tokenStopReason: generator.tokenStopReason } : {}),
       };
@@ -259,6 +248,7 @@ export function duplicateDMessageGenerator(generator: Readonly<DMessageGenerator
         aix: { ...generator.aix },
         ...(generator.metrics ? { metrics: { ...generator.metrics } } : {}),
         ...(generator.providerInfraLabel ? { providerInfraLabel: generator.providerInfraLabel } : {}),
+        ...(generator.upstreamContainer ? { upstreamContainer: { ...generator.upstreamContainer } } : {}),
         ...(generator.upstreamHandle ? { upstreamHandle: { ...generator.upstreamHandle } } : {}),
         ...(generator.tokenStopReason ? { tokenStopReason: generator.tokenStopReason } : {}),
       };
@@ -280,44 +270,18 @@ export function messageWasInterruptedAtStart(message: Pick<DMessage, 'generator'
 
 // helpers - generators
 
-export function messageSetGenerator(message: Pick<DMessage, 'generator'>, generator: undefined | DMessageGenerator): void {
-  if (generator !== undefined)
-    message.generator = generator;
-  else
-    delete message.generator;
-}
-
 export function messageSetGeneratorNamed(message: Pick<DMessage, 'generator'>, label: 'web' | 'issue' | 'help' | string): void {
-  message.generator = {
-    mgt: 'named',
-    name: label,
-  };
-}
-
-function _messageSetGeneratorAIX(message: Pick<DMessage, 'generator'>, modelLabel: string, modelVendorId: ModelVendorId, modelId: DLLMId): void {
-  message.generator = {
-    mgt: 'aix',
-    name: modelLabel,
-    aix: {
-      vId: modelVendorId,
-      mId: modelId,
-    },
-  };
+  message.generator = { mgt: 'named', name: label };
 }
 
 export function messageSetGeneratorAIX_AutoLabel(message: Pick<DMessage, 'generator'>, modelVendorId: ModelVendorId, modelId: DLLMId): void {
-
-  // Strip the serviceId prefix: 'vendor-' or 'vendor-N-' (when multiple providers of same vendor)
-  const heuristicLabel = modelId.includes('-') ? modelId.replace(/^[^-]+-(\d-)?/, '') : modelId;
-
-  _messageSetGeneratorAIX(message, heuristicLabel, modelVendorId, modelId);
+  message.generator = createGeneratorAIX_AutoLabel(modelVendorId, modelId);
 }
 
-/*export function messageUpdateGeneratorInfo(message: Pick<DMessage, 'generator'>, metrics?: DMetricsChatGenerate_Md, tokenStopReason?: DMessageGenerator['tokenStopReason']): void {
-  if (!message.generator) return;
-  if (metrics) message.generator.metrics = metrics;
-  if (tokenStopReason) message.generator.tokenStopReason = tokenStopReason;
-}*/
+export function createGeneratorAIX_AutoLabel(modelVendorId: ModelVendorId, modelId: DLLMId): DMessageGenerator {
+  const heuristicLabel = modelId.includes('-') ? modelId.replace(/^[^-]+-(\d-)?/, '') : modelId;
+  return { mgt: 'aix', name: heuristicLabel, aix: { vId: modelVendorId, mId: modelId } };
+}
 
 
 // helpers - user flags
@@ -384,6 +348,7 @@ export function messageFragmentsReduceText(fragments: Immutable<DMessageFragment
           case 'image_ref':
           case 'tool_invocation':
           case 'tool_response':
+          case 'hosted_resource':
           case '_pt_sentinel':
             break;
           default:

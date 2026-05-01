@@ -13,7 +13,6 @@ import { FormSliderControl } from '~/common/components/forms/FormSliderControl';
 import { FormSwitchControl } from '~/common/components/forms/FormSwitchControl';
 import { FormTextField } from '~/common/components/forms/FormTextField';
 import { InlineError } from '~/common/components/InlineError';
-import { useUIComplexityMode } from '~/common/stores/store-ui';
 import { webGeolocationRequest } from '~/common/util/webGeolocationUtils';
 
 import { AnthropicSkillsConfig } from './AnthropicSkillsConfig';
@@ -26,6 +25,7 @@ const _UNSPECIFIED = '_UNSPECIFIED' as const;
 
 const _antEffortOptions = [
   { value: 'max', label: 'Max', description: 'Deepest reasoning' } as const,
+  { value: 'xhigh', label: 'X-High', description: 'Extended' } as const,
   { value: 'high', label: 'High', description: 'Maximum capability' } as const,
   { value: 'medium', label: 'Medium', description: 'Balanced' } as const,
   { value: 'low', label: 'Low', description: 'Most efficient' } as const,
@@ -51,6 +51,7 @@ const _oaiEffortOptions = [
 ] as const;
 
 const _miscEffortOptions = [
+  { value: 'max', label: 'Max', description: 'Hardest thinking' } as const,
   { value: 'high', label: 'On', description: 'Multi-step reasoning' } as const,
   { value: 'none', label: 'Off', description: 'Disable thinking mode' } as const,
   { value: _UNSPECIFIED, label: 'Default', description: 'Model Default' } as const,
@@ -207,10 +208,6 @@ export function LLMParametersEditor(props: {
   // rendering options
   simplified?: boolean,
 }) {
-
-  // external state
-  const isExtra = useUIComplexityMode() === 'extra';
-
 
   // registry (const) values
   const defAntTB = DModelParameterRegistry['llmVndAntThinkingBudget'];
@@ -571,7 +568,7 @@ export function LLMParametersEditor(props: {
       />
     )}
 
-    {isExtra && showParam('llmVndAntSkills') && (
+    {showParam('llmVndAntSkills') && (
       <AnthropicSkillsConfig llmVndAntSkills={llmVndAntSkills} onChangeParameter={onChangeParameter} onRemoveParameter={onRemoveParameter} />
     )}
 
