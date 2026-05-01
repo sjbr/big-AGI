@@ -3,9 +3,9 @@ import { LLM_IF_OAI_Chat, LLM_IF_OAI_Fn, LLM_IF_OAI_Reasoning } from '~/common/s
 import type { ModelDescriptionSchema } from '../../llm.server.types';
 
 
-// [MiniMax] Hostname heuristic for OpenAI-compatible detection
-export function minimaxHeuristic(hostname: string | undefined): boolean {
-  return !!hostname && hostname.includes('minimax.io');
+// [MiniMax] URL/host heuristic for OpenAI-compatible detection
+export function minimaxHeuristic(urlOrHost: string | undefined): boolean {
+  return !!urlOrHost && urlOrHost.includes('minimax.io');
 }
 
 
@@ -14,7 +14,7 @@ export function minimaxHeuristic(hostname: string | undefined): boolean {
  * - Models: https://platform.minimax.io/docs/release-notes/models.md
  * - Pricing: https://platform.minimax.io/docs/guides/pricing-paygo.md
  * - Text generation: https://platform.minimax.io/docs/guides/text-generation.md
- * - Updated: 2026-04-04
+ * - Updated: 2026-04-16
  */
 const _knownMiniMaxModels: ModelDescriptionSchema[] = [
 
@@ -56,6 +56,17 @@ const _knownMiniMaxModels: ModelDescriptionSchema[] = [
     maxCompletionTokens: 65536,
     interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Fn, LLM_IF_OAI_Reasoning],
     chatPrice: { input: 0.60, output: 2.40, cache: { cType: 'oai-ac', read: 0.03 } },
+  },
+
+  // M2-her - dialogue-first, roleplay and character-driven chat (Jan 2026)
+  {
+    id: 'MiniMax-M2-her',
+    label: 'MiniMax M2-her',
+    description: 'Dialogue-first model for immersive roleplay, character-driven chat, and expressive multi-turn conversations. 64K context.',
+    contextWindow: 65536,
+    maxCompletionTokens: 2048,
+    interfaces: [LLM_IF_OAI_Chat, LLM_IF_OAI_Fn],
+    chatPrice: { input: 0.30, output: 1.20 },
   },
 
   // M2.1 series (legacy)

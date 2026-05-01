@@ -24,13 +24,23 @@ import { animationSpinHalfPause } from '~/common/util/animUtils';
 // configuration
 const DATASTREAM_VISUALIZATION_DELAY = Math.round(2 * Math.PI * 1000);
 const MODELOP_TIMEOUT_DELAY = 5; // seconds
-const MODELOP_TIMEOUT_LIMIT = 300; // seconds
+const MODELOP_TIMEOUT_LIMIT = 7 * 24 * 60 * 60; // seconds - 1 week for long ops, such as Gemini Deep Research
 
 const modelOperationConfig: Record<DVoidPlaceholderMOp['mot'], { Icon: React.ElementType, color: ColorPaletteProp }> = {
   'search-web': { Icon: SearchRoundedIcon, color: 'neutral' },
   'gen-image': { Icon: BrushRoundedIcon, color: 'success' },
   'code-exec': { Icon: CodeIcon, color: 'primary' },
 } as const;
+
+function _formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m < 60) return s ? `${m}m ${s}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm ? `${h}h ${rm}m` : `${h}h`;
+}
 
 
 const _styles = {
@@ -258,7 +268,7 @@ function ModelOperationChip(props: {
   const isError = state === 'error';
   const isFinished = isDone || isError;
 
-  const iText = iTexts?.join('\n').trimStart() ?? null;
+  const iText = iTexts?.join('\n\n').trimStart() ?? null;
   const oText = oTexts?.join('\n') ?? null;
   const hasDetails = !!iText || !!oText;
 
@@ -301,7 +311,7 @@ function ModelOperationChip(props: {
         {text}
         {elapsedSeconds >= MODELOP_TIMEOUT_DELAY && (
           <span style={{ opacity: 0.6 }}>
-            {' · '}<span style={{ display: 'inline-block', minWidth: elapsedSeconds >= 100 ? '3.5ch' : '2.5ch' }}>{elapsedSeconds}s</span>
+            {' · '}<span style={{ display: 'inline-block', minWidth: elapsedSeconds >= 60 ? '6ch' : '3ch' }}>{_formatElapsed(elapsedSeconds)}</span>
           </span>
         )}
       </span>
@@ -325,7 +335,11 @@ function ModelOperationChip(props: {
 
         {!!iTexts?.length && !!oTexts?.length && <Divider sx={{ my: 2 }} />}
 
-        {!!oTexts?.length && oTexts.join('\n')}
+        {!!oTexts?.length && oTexts.map((t, i) => (
+          <span key={i} style={t.startsWith('exit code:') ? { color: 'var(--joy-palette-warning-plainColor)', fontWeight: 600 } : undefined}>
+            {i > 0 && '\n'}{t}
+          </span>
+        ))}
       </div>
     }>
       {chipElement}

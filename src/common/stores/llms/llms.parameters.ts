@@ -151,7 +151,7 @@ export const DModelParameterRegistry = {
     label: 'Effort',
     type: 'enum',
     description: 'Controls reasoning depth. Works alongside thinking budget.',
-    values: ['low', 'medium', 'high', 'max'],
+    values: ['low', 'medium', 'high', 'xhigh', 'max'],
     // undefined means high effort (default)
   }),
 
@@ -175,7 +175,8 @@ export const DModelParameterRegistry = {
     label: 'Thinking',
     type: 'enum',
     description: 'Enable or disable extended thinking mode.',
-    values: ['none', 'high'],
+    values: ['none', 'high', 'max'],
+    // 'max' is for now DeepSeek V4-specific (reasoning_effort=max); other vendors restrict via enumValues
     // undefined means vendor default (usually 'high', i.e. thinking enabled)
   }),
 

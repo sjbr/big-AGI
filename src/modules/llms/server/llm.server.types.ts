@@ -139,7 +139,7 @@ export const ModelDescription_schema = z.object({
   updated: z.int().optional(),
   description: z.string(),
   contextWindow: z.int().nullable(),
-  interfaces: z.array(z.union([z.enum(LLMS_ALL_INTERFACES), z.string()])), // backward compatibility: to not Break client-side interface parsing on newer server
+  interfaces: z.array(z.enum(LLMS_ALL_INTERFACES).or(z.string())), // backward compatibility: to not Break client-side interface parsing on newer server
   parameterSpecs: z.array(ModelParameterSpec_schema).optional(),
   maxCompletionTokens: z.int().optional(), // initial parameter value for 'llmResponseTokens'
   // rateLimits: rateLimitsSchema.optional(),
@@ -165,4 +165,17 @@ export type OrtVendorLookupResult = {
 
 export const ListModelsResponse_schema = z.object({
   models: z.array(ModelDescription_schema),
+});
+
+
+/// File Metadata Response
+
+export const FileMetadataResponse_schema = z.object({
+  id: z.string(),
+  type: z.literal('file'),
+  filename: z.string(),
+  mime_type: z.string(),
+  size_bytes: z.number(),
+  created_at: z.string(),
+  downloadable: z.boolean().optional(),
 });

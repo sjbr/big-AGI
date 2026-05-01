@@ -95,8 +95,8 @@ const _styles = {
 
 
 /** Detect if content is potentially markdown based on common markdown patterns */
-function _maybeMarkdownReasoning(trimmed: string): boolean {
-  // const trimmed = text.trimStart();
+function _maybeMarkdownReasoning(text: string): boolean {
+  const trimmed = text.trimStart();
   return trimmed.startsWith('**')
     || trimmed.startsWith('# ')
     // || trimmed.startsWith('* ')
@@ -104,6 +104,8 @@ function _maybeMarkdownReasoning(trimmed: string): boolean {
     || /^#{2,6}\s/.test(trimmed);
 }
 
+
+export const BlockPartModelAuxMemo = React.memo(BlockPartModelAux);
 
 export function BlockPartModelAux(props: {
   fragmentId: DMessageFragmentId,
