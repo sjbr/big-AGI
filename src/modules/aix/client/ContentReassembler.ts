@@ -847,6 +847,19 @@ export class ContentReassembler {
       return; // container is message-scoped, not fragment-scoped
     }
 
+    // Promote Gemini Interactions session handle -> Generator (message-scoped, for cross-turn reuse).
+    // Today populated by Antigravity's `interaction.start.environment_id`; future Interactions
+    // managed agents may emit the same svs vendor/state shape and slot in here without protocol changes.
+    if (vendor === 'gemini-envid' && 'environment' in state) {
+      const { id, expiresAt } = state.environment;
+      if (id)
+        this.S.generator = {
+          ...this.S.generator,
+          upstreamContainer: { uct: 'vnd.gem.interactions', envId: id, expiresAt },
+        };
+      return; // session handle is message-scoped, not fragment-scoped
+    }
+
     // Fragment-scoped vendor states - attach to the last fragment (e.g. Gemini thoughtSignature)
     const lastIdx = this.S.fragments.length - 1;
     const lastFragment = this.S.fragments[lastIdx];
@@ -907,6 +920,12 @@ export class ContentReassembler {
    * Stores raw termination data from the wire - classification deferred to finalizeReassembly()
    */
   private onCGEnd({ terminationReason, tokenStopReason, tokenStopError }: Extract<AixWire_Particles.ChatGenerateOp, { cg: 'end' }>): void {
+    // Diagnostic: detect late 'end' particles overriding a prior termination (parser bug, replayed wire, or upstream advisory after a clean end).
+    // Behavior unchanged - we still apply the override - but the warning makes the override visible client-side, mirroring the server-side
+    // 'setDialectEnded ... (overriding)' warning in ChatGenerateTransmitter and the existing setClientAborted/setClientExcepted warnings here.
+    if (this.S.terminationReason)
+      console.warn(`[DEV] [ContentReassembler] onCGEnd: overriding prior termination '${this.S.terminationReason}' with '${terminationReason}' (wire stop: ${this.S.dialectStopReason ?? 'none'} -> ${tokenStopReason ?? 'none'})`);
+
     this.S.terminationReason = terminationReason;
     this.S.dialectStopReason = tokenStopReason;
     // Vendor-composed stop error, surfaced as a complementary error fragment alongside the generic classification message
@@ -993,6 +1012,11 @@ export class ContentReassembler {
   }
 
   private onCGIssue({ issueId: _issueId /* Redundant as we add an Error Fragment already */, issueText, issueHint }: Extract<AixWire_Particles.ChatGenerateOp, { cg: 'issue' }> & { issueHint?: DMessageErrorPart['hint'] }): void {
+    // Diagnostic: detect issue particles arriving after a clean termination (e.g. OpenAI rate-limit advisory after response.completed).
+    // Behavior unchanged - the issue is still appended - but the warning surfaces that we are mutating a finished message.
+    if (this.S.terminationReason && this.S.terminationReason === 'done-dialect')
+      console.warn(`[DEV] [ContentReassembler] onCGIssue: appending issue after clean '${this.S.terminationReason}' (wire stop: ${this.S.dialectStopReason ?? 'none'}): ${issueText}`);
+
     // NOTE: not sure I like the flow at all here
     // there seem to be some bad conditions when issues are raised while the active part is not text
     if (MERGE_ISSUES_INTO_TEXT_PART_IF_OPEN) {

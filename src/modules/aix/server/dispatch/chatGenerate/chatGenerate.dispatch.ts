@@ -25,7 +25,7 @@ import { createAnthropicFileInlineTransform } from './parsers/anthropic.transfor
 import { createAnthropicMessageParser, createAnthropicMessageParserNS } from './parsers/anthropic.parser';
 import { createBedrockConverseParserNS, createBedrockConverseStreamParser } from './parsers/bedrock-converse.parser';
 import { createGeminiGenerateContentResponseParser } from './parsers/gemini.parser';
-import { createGeminiInteractionsParserSSE } from './parsers/gemini.interactions.parser';
+import { createGeminiInteractionsParserNS, createGeminiInteractionsParserSSE } from './parsers/gemini.interactions.parser';
 import { createOpenAIChatCompletionsChunkParser, createOpenAIChatCompletionsParserNS } from './parsers/openai.parser';
 import { createOpenAIResponseParserNS, createOpenAIResponsesEventParser } from './parsers/openai.responses.parser';
 
@@ -239,7 +239,6 @@ export async function createChatGenerateDispatch(access: AixAPI_Access, model: A
     case 'mistral':
     case 'moonshot':
     case 'openai':
-    case 'openpipe':
     case 'openrouter':
     case 'perplexity':
     case 'togetherai':
@@ -329,16 +328,16 @@ export async function createChatGenerateResumeDispatch(access: AixAPI_Access, re
       };
 
     case 'gemini': {
-      // [Gemini Interactions] Reattach via SSE stream - GET /interactions/{id}?stream=true replays all events from the start (intentional - client's ContentReassembler replaces message content on reattach; partial resume via last_event_id is deliberately NOT used).
+      // [Gemini Interactions] Reattach: SSE replay (?stream=true) or JSON snapshot (no query). See kb/modules/LLM-gemini-interactions.md.
       if (resumeHandle.uht !== 'vnd.gem.interactions')
         throw new Error(`Resume handle mismatch for gemini: expected 'vnd.gem.interactions', got '${resumeHandle.uht}'`);
-      if (!streaming) console.warn(`[DEV] Gemini Interactions API - Resume only supported in SSE mode, ignoring streaming=false for ${resumeHandle.runId}`);
       const { url: _baseUrl, headers: _headers } = geminiAccess(access, null, GeminiInteractionsWire_API_Interactions.getPath(resumeHandle.runId /* Gemini interaction.id */), false);
       return {
-        request: { url: `${_baseUrl}${_baseUrl.includes('?') ? '&' : '?'}stream=true`, method: 'GET', headers: _headers },
-        /** Again, only support SSE here, for now (see comment in `createChatGenerateDispatch`) */
-        demuxerFormat: 'fast-sse',
-        chatGenerateParse: createGeminiInteractionsParserSSE(null /* model name unknown at resume time - caller's DMessage already has it */),
+        request: { url: streaming ? `${_baseUrl}${_baseUrl.includes('?') ? '&' : '?'}stream=true` : _baseUrl, method: 'GET', headers: _headers },
+        demuxerFormat: streaming ? 'fast-sse' : null,
+        chatGenerateParse: streaming
+          ? createGeminiInteractionsParserSSE(null /* model name unknown at resume time - caller's DMessage already has it */)
+          : createGeminiInteractionsParserNS(null),
       };
     }
 
@@ -355,7 +354,6 @@ export async function createChatGenerateResumeDispatch(access: AixAPI_Access, re
     case 'mistral':
     case 'moonshot':
     case 'ollama':
-    case 'openpipe':
     case 'perplexity':
     case 'togetherai':
     case 'xai':

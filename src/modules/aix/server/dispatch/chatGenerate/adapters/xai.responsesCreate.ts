@@ -95,17 +95,19 @@ export function aixToXAIResponses(
   }
 
   // Reasoning
+  // - grok-4.3:                  none/low(default)/medium/high
+  // - grok-4.20-multi-agent:     low/medium/high/xhigh (4 vs 16 agents)
+  // - grok-4.20 reasoning/non-reasoning: no effort param (slug selects mode)
   const reasoningEffort = model.reasoningEffort; // ?? model.vndOaiReasoningEffort;
-  if (reasoningEffort === 'none' || reasoningEffort === 'minimal' || reasoningEffort === 'xhigh' || reasoningEffort === 'max') // domain validation
+  if (reasoningEffort === 'minimal' || reasoningEffort === 'max') // domain validation: still unsupported
     throw new Error(`XAI Responses API does not support reasoning effort '${reasoningEffort}'`);
 
-  if (reasoningEffort) {
-    payload.reasoning = {
-      effort: reasoningEffort,
-      // generate_summary: unsupported
-      // summary: unsupported, defaults to 'detailed'
-    };
-  }
+  // Always request detailed reasoning summaries - grok-4.3 and others have reasoning enabled by default
+  // but only return summary text when explicitly requested. Also set effort when configured.
+  payload.reasoning = {
+    ...(reasoningEffort ? { effort: reasoningEffort } : {}),
+    summary: 'detailed',
+  };
 
   // Add include options for reasoning and specialized for tool sources
   if (AIX_XAI_ADD_ENCRYPTED_REASONING)
