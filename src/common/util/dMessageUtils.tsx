@@ -216,6 +216,9 @@ export function useMessageAvatarLabel(
   const laggedGeneratorRef = React.useRef<DMessageGenerator | undefined>(undefined);
   laggedGeneratorRef.current = generator;
   const generatorName = generator?.name ?? '';
+  // metrics ref changes only when token counts update (not every streaming tick), so depending on it
+  // recomputes the memo when preliminary metrics arrive - without losing the per-update lag optimization
+  const generatorMetrics = generator?.metrics;
 
   return React.useMemo(() => {
     if (created === undefined) {
@@ -232,17 +235,20 @@ export function useMessageAvatarLabel(
       };
     }
 
-    // incomplete: just the name
+    // incomplete: name + the "Thinking..." indicator, plus any preliminary metrics that already arrived (e.g. input tokens)
     const prettyName = prettyShortChatModelName(generatorName);
-    if (pendingIncomplete)
+    if (pendingIncomplete) {
+      const liveMetrics = generatorMetrics ? prettyMessageMetrics(generatorMetrics, complexity) : null;
       return {
         label: prettyName,
         tooltip: (!created || complexity === 'minimal') ? null : (
           <Box sx={tooltipSx}>
             <TimeAgo date={created} formatter={(value: number, unit: string, _suffix: string) => `Thinking for ${value} ${unit}${value > 1 ? 's' : ''}...`} />
+            {liveMetrics}
           </Box>
         ),
       };
+    }
 
     // named generator: nothing else to do there
     if (generator.mgt === 'named')
@@ -275,7 +281,7 @@ export function useMessageAvatarLabel(
         </Box>
       ),
     };
-  }, [complexity, created, generatorName, pendingIncomplete, updated]);
+  }, [complexity, created, generatorMetrics, generatorName, pendingIncomplete, updated]);
 }
 
 /** Renders chat generation metrics as a grid. Exported for reuse in message info popup. */
@@ -284,7 +290,7 @@ export function prettyMessageMetrics(metrics: DMessageGenerator['metrics'], uiCo
 
   const showWaitingTime = metrics?.dtStart !== undefined && (uiComplexityMode === 'extra' || metrics.dtStart >= 10000);
   const showSpeedSection = uiComplexityMode !== 'minimal' && (showWaitingTime || metrics?.vTOutInner !== undefined);
-  const showTimeSection = showSpeedSection && !!metrics?.dtAll;
+  const showTimeSection = uiComplexityMode !== 'minimal' && !!metrics?.dtAll;
 
   const costCode = metrics.$code ? _prettyCostCode(metrics.$code) : null;
 
@@ -479,9 +485,18 @@ export function prettyShortChatModelName(model: string | undefined): string {
     if (model.includes('grok-beta')) return 'Grok Beta';
     if (model.includes('grok-vision-beta')) return 'Grok Vision Beta';
   }
-  // [Z.ai]
-  if (model.startsWith('glm-')) {
+  // [OpenAI OSS] gpt-oss family (shared across Cerebras/Groq/etc.) - the OpenAI regex above only matches gpt-[345]
+  if (model.includes('gpt-oss')) {
+    return model.slice(model.indexOf('gpt-oss'))
+      .replace('gpt-oss', 'GPT OSS')
+      .replace('-safeguard', ' Safeguard')
+      .replaceAll('-', ' ')
+      .replace(/(\d+)b\b/i, '$1B'); // '120b' -> '120B'
+  }
+  // [Z.ai] GLM family - also handles the 'zai-glm-...' ids exposed by Cerebras
+  if (model.startsWith('glm-') || model.startsWith('zai-glm-')) {
     return model
+      .replace('zai-', '')
       .replace('glm-', 'GLM-')
       .replace('ocr', 'OCR')
       .replace(/(\d)v/, '$1 V')   // vision suffix: 4.6v → 4.6 V
@@ -492,6 +507,12 @@ export function prettyShortChatModelName(model: string | undefined): string {
       .replace('-code', ' Code')
       .replace(/-x$/, ' X')
       .replace(/-32b.*$/, ' 32B');
+  }
+  // [Sakana.ai] fugu, fugu-ultra, fugu-ultra-20260615 (service prefix already stripped by the auto-label heuristic)
+  if (model === 'fugu' || model.startsWith('fugu-')) {
+    return model
+      .replace(/-20\d{6}$/, '') // strip dated snapshot suffix (e.g. -20260615)
+      .split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
   }
   // [FireworksAI]
   if (model.includes('accounts/')) {
@@ -537,6 +558,7 @@ function _prettyGeminiModelName(cutModel: string): string {
     .replace('flash', 'Flash')
     .replace('max', 'Max')
     .replace('lite', 'Lite')
+    .replace(/(\d)b\b/g, '$1B') // size token: '31b' -> '31B' (e.g. Gemma 4 31B)
     // feature variants
     .replace('robotics er', 'Robotics')
     .replace('computer use', 'Computer Use')
@@ -560,6 +582,8 @@ function _prettyAnthropicModelName(modelId: string): string | null {
   const m = modelId.match(/-(\d)(?:-(\d)(?!\d))?/);
   const version = m ? (m[2] ? `${m[1]}.${m[2]}` : m[1]) : '?';
 
+  if (modelId.includes('-fable')) return `Claude Fable ${version}`;
+  if (modelId.includes('-mythos')) return modelId.includes('-preview') ? 'Claude Mythos Preview' : `Claude Mythos ${version}`;
   if (modelId.includes('-opus')) return `Claude Opus ${version}`;
   if (modelId.includes('-sonnet')) return `Claude Sonnet ${version}`;
   if (modelId.includes('-haiku')) return `Claude Haiku ${version}`;

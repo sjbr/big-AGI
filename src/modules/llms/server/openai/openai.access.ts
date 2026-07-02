@@ -4,8 +4,8 @@
  * This module only imports zod for schema definition and provides access logic
  * that works identically on server and client environments.
  *
- * Supports 14 OpenAI-compatible dialects: alibaba, azure, deepseek, groq, lmstudio,
- * localai, mistral, moonshot, openai, openrouter, perplexity, togetherai, xai, zai
+ * Supports 16 OpenAI-compatible dialects: alibaba, azure, cerebras, deepseek, groq, lmstudio,
+ * localai, mistral, moonshot, openai, openrouter, perplexity, sakanaai, togetherai, xai, zai
  */
 
 import * as z from 'zod/v4';
@@ -21,6 +21,7 @@ import { llmsFixupHost, llmsHostnameMatches } from '../../shared/llm.isomorphic'
 
 // configuration
 const DEFAULT_ALIBABA_HOST = 'https://dashscope-intl.aliyuncs.com/compatible-mode';
+const DEFAULT_CEREBRAS_HOST = 'https://api.cerebras.ai';
 const DEFAULT_DEEPSEEK_HOST = 'https://api.deepseek.com';
 const DEFAULT_GROQ_HOST = 'https://api.groq.com/openai';
 const DEFAULT_HELICONE_OPENAI_HOST = 'oai.hconeai.com';
@@ -31,6 +32,7 @@ const DEFAULT_MOONSHOT_HOST = 'https://api.moonshot.ai';
 const DEFAULT_OPENAI_HOST = 'api.openai.com';
 const DEFAULT_OPENROUTER_HOST = 'https://openrouter.ai/api';
 const DEFAULT_PERPLEXITY_HOST = 'https://api.perplexity.ai';
+const DEFAULT_SAKANA_HOST = 'https://api.sakana.ai';
 const DEFAULT_TOGETHERAI_HOST = 'https://api.together.xyz';
 const DEFAULT_XAI_HOST = 'https://api.x.ai';
 const DEFAULT_ZAI_HOST = 'https://api.z.ai/api/paas';
@@ -82,9 +84,9 @@ export type OpenAIDialects = OpenAIAccessSchema['dialect'];
 export type OpenAIAccessSchema = z.infer<typeof openAIAccessSchema>;
 export const openAIAccessSchema = z.object({
   dialect: z.enum([
-    'alibaba', 'azure', 'deepseek', 'groq', 'lmstudio',
+    'alibaba', 'azure', 'cerebras', 'deepseek', 'groq', 'lmstudio',
     'localai', 'mistral', 'moonshot', 'openai',
-    'openrouter', 'perplexity', 'togetherai', 'xai', 'zai',
+    'openrouter', 'perplexity', 'sakanaai', 'togetherai', 'xai', 'zai',
   ]),
   clientSideFetch: z.boolean().optional(), // optional: backward compatibility from newer server version - can remove once all clients are updated
   oaiKey: z.string().trim(),
@@ -120,6 +122,25 @@ export function openAIAccess(access: OpenAIAccessSchema, modelRefId: string | nu
 
     case 'azure':
       return _azureOpenAIAccess(access, modelRefId, apiPath);
+
+    case 'cerebras':
+      // [Cerebras] OpenAI-compatible, fixed host (no host map): api.cerebras.ai + /v1/...
+      let cerebrasKey = access.oaiKey || env.CEREBRAS_API_KEY || '';
+
+      // Use function to select a random key if multiple keys are provided
+      cerebrasKey = llmsRandomKeyFromMultiKey(cerebrasKey);
+
+      if (!cerebrasKey)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Missing Cerebras API Key. Add it on the UI (Models Setup) or server side (your deployment).' });
+
+      return {
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${cerebrasKey}`,
+        },
+        url: llmsFixupHost(DEFAULT_CEREBRAS_HOST, apiPath) + apiPath,
+      };
 
     case 'deepseek':
       // https://platform.deepseek.com/api-docs/
@@ -327,6 +348,25 @@ export function openAIAccess(access: OpenAIAccessSchema, modelRefId: string | nu
           'Authorization': `Bearer ${perplexityKey}`,
         },
         url: perplexityHost + apiPath,
+      };
+
+    case 'sakanaai':
+      // https://console.sakana.ai/models - OpenAI-compatible (Responses + Chat Completions)
+      let sakanaKey = access.oaiKey || env.SAKANA_API_KEY || '';
+      const sakanaHost = llmsFixupHost(access.oaiHost || env.SAKANA_API_HOST || DEFAULT_SAKANA_HOST, apiPath);
+
+      // Use function to select a random key if multiple keys are provided
+      sakanaKey = llmsRandomKeyFromMultiKey(sakanaKey);
+
+      if (!sakanaKey || !sakanaHost)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Missing Sakana AI API Key or Host. Add it on the UI (Models Setup) or server side (your deployment).' });
+
+      return {
+        headers: {
+          'Authorization': `Bearer ${sakanaKey}`,
+          'Content-Type': 'application/json',
+        },
+        url: sakanaHost + apiPath,
       };
 
     case 'togetherai':

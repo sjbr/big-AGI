@@ -4,9 +4,10 @@ import type { DMessageGenerator } from '~/common/stores/chat/chat.message';
 import type { MaybePromise } from '~/common/types/useful.types';
 import { convert_Base64WithMimeType_To_Blob } from '~/common/util/blobUtils';
 import { create_CodeExecutionInvocation_ContentFragment, create_CodeExecutionResponse_ContentFragment, create_FunctionCallInvocation_ContentFragment, createAnnotationsVoidFragment, createDMessageDataRefDBlob, createDVoidWebCitation, createErrorContentFragment, createHostedResourceContentFragment, createModelAuxVoidFragment, createPlaceholderVoidFragment, createTextContentFragment, createZyncAssetReferenceContentFragment, DMessageErrorPart, DVoidModelAuxPart, DVoidPlaceholderMOp, isContentFragment, isModelAuxPart, isTextContentFragment, isVoidAnnotationsFragment, isVoidFragment, isVoidPlaceholderFragment } from '~/common/stores/chat/chat.fragments';
+import { downloadBlob } from '~/common/util/downloadUtils';
 import { ellipsizeMiddle } from '~/common/util/textUtils';
 import { imageBlobTransform, PLATFORM_IMAGE_MIMETYPE } from '~/common/util/imageUtils';
-import { metricsFinishChatGenerateLg, metricsPendChatGenerateLg } from '~/common/stores/metrics/metrics.chatgenerate';
+import { metricsChatGenerateLgToMd, metricsFinishChatGenerateLg, metricsPendChatGenerateLg } from '~/common/stores/metrics/metrics.chatgenerate';
 import { nanoidToUuidV4 } from '~/common/util/idUtils';
 
 import type { AixWire_Particles } from '../server/api/aix.wiretypes';
@@ -95,6 +96,7 @@ export class ContentReassembler {
     private readonly particleTransforms: ReassemblerParticleTransforms[],
     private readonly skipImageCompression?: boolean,
     private readonly onInlineAudio?: (audio: { blob: Blob; mimeType: string; label: string; durationMs?: number }) => void,
+    private readonly onInlineVideo?: (video: { blob: Blob; mimeType: string; label: string }) => void,
     private readonly wireAbortSignal?: AbortSignal,
   ) {
     this.initialState = {
@@ -278,7 +280,8 @@ export class ContentReassembler {
     } catch (error) {
 
       //
-      // Classify and display processing errors (particle/async work failures)
+      // [Error Channel 2] Classify/display particle-PROCESSING errors (see channel map in aix.client.errors.ts;
+      // [Error Channel 1] transport/connection errors are handled by the stream-loop catch in aix.client.ts).
       //
       // NOTE: we cannot throw here as we are part of a detached promise chain
       // READ the `aixClassifyReassemblyError` that explains this in detail
@@ -368,6 +371,9 @@ export class ContentReassembler {
             break;
           case 'ii':
             await this.onAppendInlineImage(op);
+            break;
+          case 'iv':
+            await this.onAppendInlineVideo(op);
             break;
           case 'vp':
             this.onSetOperationState(op);
@@ -623,6 +629,33 @@ export class ContentReassembler {
     }
   }
 
+  private async onAppendInlineVideo(particle: Extract<AixWire_Particles.PartParticleOp, { p: 'iv' }>): Promise<void> {
+
+    // Break text accumulation, as we have a full video part in the middle
+    this.S._textFragmentIndex = null;
+
+    const { mimeType, v_b64: base64Data, label } = particle;
+    const safeLabel = label || 'Generated Video';
+
+    try {
+
+      // create blob from base64 - this will throw on malformed data
+      const videoBlob = await convert_Base64WithMimeType_To_Blob(base64Data, mimeType, 'ContentReassembler.onAppendInlineVideo');
+
+      // EXPERIMENTAL: generated video is NOT persisted (would be a large blob + object-URLs die on reload).
+      // We save only a breadcrumb; the actual video is handed to the caller for ephemeral in-memory playback.
+      const sizeMB = Math.round(videoBlob.size / 1024 / 102.4) / 10;
+      this._pushFragment(createTextContentFragment(`Generated video ▶ \`${safeLabel}\` (${sizeMB} MB, in-memory only - not saved)`));
+
+      // notify caller for ephemeral playback (object URL created + revoked by the caller)
+      this.onInlineVideo?.({ blob: videoBlob, mimeType, label: safeLabel });
+
+    } catch (error: any) {
+      console.warn('[DEV] Failed to process inline video:', { label: safeLabel, error, mimeType, size: base64Data.length });
+      this._appendErrorFragment(`Failed to process video: ${error?.message || 'Unknown error'}`, 'aix-video-processing');
+    }
+  }
+
   private async onAppendInlineImage(particle: Extract<AixWire_Particles.PartParticleOp, { p: 'ii' }>): Promise<void> {
 
     // Break text accumulation, as we have a full image part in the middle
@@ -701,8 +734,35 @@ export class ContentReassembler {
         }));
         break;
 
+      case 'vnd.oai.container_file':
+        this._pushFragment(createHostedResourceContentFragment({
+          via: 'openai-container',
+          fileId: op.fileId,
+          containerId: op.containerId,
+          ...(op.filename ? { filename: op.filename } : {}),
+        }));
+        break;
+
+      case 'inline-download': {
+        // [Gemini] Inline file artifact (bytes arrive once on the wire): fire-and-forget client download,
+        // plus a one-line text-fragment breadcrumb in place of the download so the transcript records it
+        // (mirrors the 'Generated audio' breadcrumb in onAppendInlineAudio).
+        //
+        // PARITY GAP vs the two cases above: Anthropic ('vnd.ant.file') and OpenAI ('vnd.oai.container_file')
+        // are server-hosted and re-fetchable by id, so they persist as a hosted_resource fragment with a
+        // download-on-demand chip. Gemini sends the bytes once with no handle - so chip parity would require
+        // STORING the bytes in a fragment (a new DMessage part + persistence), which we deliberately avoid to
+        // keep the artifact out of the conversation. Hence: download + note, not a stored re-fetchable resource.
+        const filename = op.filename || `download.${op.mimeType.split(';')[0].trim().split('/')[1] || 'bin'}`;
+        convert_Base64WithMimeType_To_Blob(op.b64, op.mimeType, 'ContentReassembler.onAppendHostedResource.inline-download')
+          .then(blob => downloadBlob(blob, filename))
+          .catch(error => console.warn('[ContentReassembler] inline-download failed:', error));
+        this._pushFragment(createTextContentFragment(`Generated file ⬇ \`${filename}\` (${op.mimeType})`));
+        break;
+      }
+
       default:
-        const _exhaustiveCheck: never = op.kind;
+        const _exhaustiveCheck: never = op;
         console.warn('[ContentReassembler] onAppendHostedResource: unrecognized hosted resource kind', { op });
         break;
     }
@@ -844,6 +904,24 @@ export class ContentReassembler {
           ...this.S.generator,
           upstreamContainer: { uct: 'vnd.ant.container', containerId: id, expiresAt },
         };
+      return; // container is message-scoped, not fragment-scoped
+    }
+
+    // Promote OpenAI code-interpreter session container -> Generator (message-scoped, for cross-turn reuse + file downloads).
+    // Invariant: one container per Response - auto mode keeps every code_interpreter_call in a turn on the same sandbox.
+    // A divergence here is unexpected (a >20min single-Response container rotation, or an upstream/parser anomaly).
+    // Cross-turn round-trip then collapses to the most-recent container (see newCodeInterpreterCallMessage in openai.responsesCreate.ts).
+    if (vendor === 'openai-container' && 'container' in state) {
+      const { id, expiresAt } = state.container;
+      if (id && expiresAt) {
+        const prior = this.S.generator?.upstreamContainer;
+        if (prior?.uct === 'vnd.oai.container' && prior.containerId !== id)
+          console.warn(`[DEV] AIX: OpenAI Responses - container diverged within one message: ${prior.containerId} -> ${id}`);
+        this.S.generator = {
+          ...this.S.generator,
+          upstreamContainer: { uct: 'vnd.oai.container', containerId: id, expiresAt },
+        };
+      }
       return; // container is message-scoped, not fragment-scoped
     }
 
@@ -1074,7 +1152,9 @@ export class ContentReassembler {
     }
 
     // -> ph: show retry status
-    const retryMessage = `Retrying [${attempt}/${maxAttempts}] in ${Math.round(delayMs / 100) / 10}s - ${reason}`;
+    const retryMessage =  delayMs > 0
+      ? `${reason ? `${reason} - ` : ''}Retrying in ${Math.round(delayMs / 100) / 10}s - ${attempt}/${maxAttempts}`
+      : `Connection failed (${attempt} retries)`;
     this._pushFragment(createPlaceholderVoidFragment(retryMessage, undefined, {
       ctl: 'ec-retry',
       rScope: rScope,
@@ -1087,7 +1167,11 @@ export class ContentReassembler {
   private onMetrics({ metrics }: Extract<AixWire_Particles.ChatGenerateOp, { cg: 'set-metrics' }>): void {
     // type check point for AixWire_Particles.CGSelectMetrics -> DMetricsChatGenerate_Lg
     this.S.cgMetricsLg = metrics;
-    metricsPendChatGenerateLg(this.S.cgMetricsLg);
+    metricsPendChatGenerateLg(this.S.cgMetricsLg); // sets TsR='pending'
+    // Reflect preliminary token counts on the generator during streaming, so the UI (avatar tooltip,
+    // Message Info modal) can show input/output tokens early. Costs are intentionally omitted here -
+    // they are computed at finalization (_finalizeLlmMetricsWithCosts), which then overwrites these.
+    this.S.generator = { ...this.S.generator, metrics: metricsChatGenerateLgToMd(this.S.cgMetricsLg) };
   }
 
   private onModelName({ name }: Extract<AixWire_Particles.ChatGenerateOp, { cg: 'set-model' }>): void {
