@@ -118,9 +118,8 @@ export function aixToOpenAIResponses(
 
 
   // Reasoning
+  // [2026-07-09, OpenAI] 'max' effort is valid since GPT-5.6 (was Responses-rejected before then) - per-model domain validation is left to the API
   const reasoningEffort = model.reasoningEffort; // ?? model.vndOaiReasoningEffort;
-  if (reasoningEffort === 'max') // domain validation
-    throw new Error(`OpenAI Responses API does not support '${reasoningEffort}' reasoning effort`);
 
   if (reasoningEffort) {
     payload.reasoning = {
@@ -133,6 +132,11 @@ export function aixToOpenAIResponses(
     if (reasoningEffort !== 'none' && !model.forceNoStream && !specialExclusions)
       payload.reasoning.summary = 'detailed';
   }
+
+  // [2026-07-09, OpenAI] GPT-5.6+ Reasoning Mode: 'pro' performs additional model work for the hardest problems, billed at
+  // standard token rates (replaces standalone '-pro' models); orthogonal to effort, verified working with streaming
+  if (model.vndOaiReasoningMode)
+    payload.reasoning = { ...payload.reasoning, mode: model.vndOaiReasoningMode };
 
   // ALWAYS REQUEST Reasoning items: always include encrypted_content if there's any reasoning done; we had this inside the
   // former block, but models can reason even if reasoningEffort === undefined;

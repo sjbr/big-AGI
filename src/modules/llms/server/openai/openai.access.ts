@@ -4,7 +4,7 @@
  * This module only imports zod for schema definition and provides access logic
  * that works identically on server and client environments.
  *
- * Supports 16 OpenAI-compatible dialects: alibaba, azure, cerebras, deepseek, groq, lmstudio,
+ * Supports 17 OpenAI-compatible dialects: alibaba, azure, cerebras, cohere, deepseek, groq, lmstudio,
  * localai, mistral, moonshot, openai, openrouter, perplexity, sakanaai, togetherai, xai, zai
  */
 
@@ -22,6 +22,7 @@ import { llmsFixupHost, llmsHostnameMatches } from '../../shared/llm.isomorphic'
 // configuration
 const DEFAULT_ALIBABA_HOST = 'https://dashscope-intl.aliyuncs.com/compatible-mode';
 const DEFAULT_CEREBRAS_HOST = 'https://api.cerebras.ai';
+const DEFAULT_COHERE_HOST = 'https://api.cohere.ai/compatibility';
 const DEFAULT_DEEPSEEK_HOST = 'https://api.deepseek.com';
 const DEFAULT_GROQ_HOST = 'https://api.groq.com/openai';
 const DEFAULT_HELICONE_OPENAI_HOST = 'oai.hconeai.com';
@@ -60,6 +61,12 @@ export const OPENAI_API_PATHS = {
   xaiLanguageModels: '/v1/language-models',
 } as const;
 
+// -- OpenRouter-specific API Paths --
+
+export const OPENROUTER_API_PATHS = {
+  images: '/v1/images', // dedicated image generation endpoint, not OpenAI-compatible
+} as const;
+
 
 /** Select a random key from a comma-separated list of API keys, used to load balance. */
 export function llmsRandomKeyFromMultiKey(multiKeyString: string): string {
@@ -84,7 +91,7 @@ export type OpenAIDialects = OpenAIAccessSchema['dialect'];
 export type OpenAIAccessSchema = z.infer<typeof openAIAccessSchema>;
 export const openAIAccessSchema = z.object({
   dialect: z.enum([
-    'alibaba', 'azure', 'cerebras', 'deepseek', 'groq', 'lmstudio',
+    'alibaba', 'azure', 'cerebras', 'cohere', 'deepseek', 'groq', 'lmstudio',
     'localai', 'mistral', 'moonshot', 'openai',
     'openrouter', 'perplexity', 'sakanaai', 'togetherai', 'xai', 'zai',
   ]),
@@ -140,6 +147,25 @@ export function openAIAccess(access: OpenAIAccessSchema, modelRefId: string | nu
           'Authorization': `Bearer ${cerebrasKey}`,
         },
         url: llmsFixupHost(DEFAULT_CEREBRAS_HOST, apiPath) + apiPath,
+      };
+
+    case 'cohere':
+      // [Cohere] OpenAI-compatible endpoint: https://api.cohere.ai/compatibility + /v1/... (verified 2026-07-08). BYO-key only.
+      let cohereKey = access.oaiKey || '';
+      const cohereHost = llmsFixupHost(access.oaiHost || DEFAULT_COHERE_HOST, apiPath);
+
+      // Use function to select a random key if multiple keys are provided
+      cohereKey = llmsRandomKeyFromMultiKey(cohereKey);
+
+      if (!cohereKey || !cohereHost)
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Missing Cohere API Key. Add it on the UI (Models Setup).' });
+
+      return {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${cohereKey}`,
+        },
+        url: cohereHost + apiPath,
       };
 
     case 'deepseek':

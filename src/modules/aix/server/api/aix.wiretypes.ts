@@ -162,7 +162,7 @@ export namespace AixWire_Parts {
      * - image/gif: Anthropic, OpenAI
      * - image/heic, image/heif: Gemini
      */
-    mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+    mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp']), // keep in sync with AIX_WIRE_IMAGE_MIMETYPES
     base64: z.string(),
   });
 
@@ -540,6 +540,7 @@ export namespace AixWire_API {
     vndOaiCodeInterpreter: z.enum(['off', 'auto']).optional(),
     vndOaiContainerId: z.string().optional(), // [Responses] reuse a prior code-interpreter session container (caller checks expiry before setting)
     vndOaiImageGeneration: z.enum(['mq', 'hq', 'hq_edit', 'hq_png']).optional(),
+    vndOaiReasoningMode: z.enum(['standard', 'pro']).optional(), // [2026-07-09, OpenAI] [Responses] GPT-5.6+ reasoning.mode - 'pro' performs additional model work, billed at standard rates
     vndOaiResponsesAPI: z.boolean().optional(),
     vndOaiRestoreMarkdown: z.boolean().optional(),
     vndOaiVerbosity: z.enum(['low', 'medium', 'high']).optional(),
@@ -800,6 +801,7 @@ export namespace AixWire_Particles {
     | { p: 'urlc', title: string, url: string, num?: number, from?: number, to?: number, text?: string, pubTs?: number } // url citation - pubTs: publication timestamp
     | { p: 'hres' } & ( // hosted resource - provider-hosted resource
       | { kind: 'vnd.ant.file', fileId: string, containerId?: string }
+      | { kind: 'vnd.gem.file', fileName: string, mimeType: string, isVideo?: boolean } // [Gemini Omni] Files-API artifact (e.g. delivery:uri video): re-fetchable by `files/{id}` name for ~48h via the key-proxied Gemini download route
       | { kind: 'vnd.oai.container_file', fileId: string, containerId: string, filename?: string } // OpenAI code-interpreter container file (download via /v1/containers/.../files/.../content)
       | { kind: 'inline-download', mimeType: string, b64: string, filename?: string } // inline bytes (e.g. Gemini code-exec file): client downloads & discards, never stored/re-fetchable
       )
