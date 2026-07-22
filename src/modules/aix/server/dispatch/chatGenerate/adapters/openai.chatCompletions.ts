@@ -163,7 +163,7 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
   const reasoningEffort = model.reasoningEffort; // ?? model.vndOaiReasoningEffort;
   if (reasoningEffort
     && openAIDialect !== 'openrouter' // OpenRouter has its own channeling of this
-    && openAIDialect !== 'deepseek' && openAIDialect !== 'moonshot' && openAIDialect !== 'zai' // MoonShot maps to none->disabled / high->enabled
+    && openAIDialect !== 'deepseek' && openAIDialect !== 'moonshot' && openAIDialect !== 'zai' // these map to thinking enabled/disabled (+ reasoning_effort passthrough) in the block below
     && openAIDialect !== 'alibaba' // Alibaba/Qwen ignores reasoning_effort; uses enable_thinking instead (block below)
     && openAIDialect !== 'perplexity' // Perplexity has its own block below with stricter validation
   ) {
@@ -171,13 +171,13 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
     payload.reasoning_effort = reasoningEffort;
   }
 
-  // [Moonshot] Kimi K2.5 reasoning effort -> thinking mode (only 'none' and 'high' supported for now)
+  // [Moonshot] Kimi reasoning effort -> thinking mode; Kimi Code 'k3' also honors reasoning_effort low/high/max (probe-verified 2026-07-18: primary K2.5/K2.6 tolerate the extra field, 'kimi-for-coding' ignores it)
   // [Z.ai] GLM thinking mode: binary enabled/disabled (supports GLM-4.5 series and higher) - https://docs.z.ai/guides/capabilities/thinking-mode
   // [DeepSeek, 2026-04-23] V4 thinking control https://api-docs.deepseek.com/guides/thinking_mode
   if (reasoningEffort && (openAIDialect === 'deepseek' || openAIDialect === 'moonshot' || openAIDialect === 'zai')) {
     // [Z.ai, 2026-06-13] reasoning_effort is GLM-5.2 only; other GLM models are binary thinking enabled/disabled - https://docs.z.ai/api-reference/llm/chat-completion
-    const supportsMaxEffort = openAIDialect === 'deepseek' || (openAIDialect === 'zai' && model.id.startsWith('glm-5.2'));
-    const allowedEffort = supportsMaxEffort ? ['none', 'high', 'max'] : ['none', 'high'];
+    const supportsEffortLevels = openAIDialect === 'deepseek' || openAIDialect === 'moonshot' || (openAIDialect === 'zai' && model.id.startsWith('glm-5.2'));
+    const allowedEffort = openAIDialect === 'moonshot' ? ['none', 'low', 'high', 'max'] : supportsEffortLevels ? ['none', 'high', 'max'] : ['none', 'high'];
     if (!allowedEffort.includes(reasoningEffort)) // domain validation
       throw new Error(`${openAIDialect} only supports reasoning effort ${allowedEffort.join(', ')}, got '${reasoningEffort}'`);
 
@@ -185,7 +185,7 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
 
     // [DeepSeek, 2026-04-23] DeepSeek also supports effort control for reasoning-enabled requests - set it here as it was carved from the reasoningEffort setter before
     // [Z.ai, 2026-06-13] GLM-5.2 reasoning_effort takes effect only when thinking is enabled (i.e. effort !== 'none')
-    if (supportsMaxEffort && reasoningEffort !== 'none')
+    if (supportsEffortLevels && reasoningEffort !== 'none')
       payload.reasoning_effort = reasoningEffort;
   }
 
@@ -205,7 +205,7 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
 
   // Allow/deny auto-adding hosted tools when custom tools are present
   const hasCustomTools = chatGenerate.tools?.some(t => t.type === 'function_call');
-  const hasRestrictivePolicy = chatGenerate.toolsPolicy?.type === 'any' || chatGenerate.toolsPolicy?.type === 'function_call';
+  const hasRestrictivePolicy = chatGenerate.toolsPolicy?.type === 'any' /* || chatGenerate.toolsPolicy?.type === 'function_call' - DISABLED 2026-07-17, see ToolsPolicy_schema */;
   const skipWebSearchDueToCustomTools = hasCustomTools && hasRestrictivePolicy;
 
   // Hosted tools
@@ -427,6 +427,10 @@ function _fixAlternateUserAssistantRoles(chatMessages: TRequestMessages): TReque
 
 function _fixRemoveEmptyMessages(chatMessages: TRequestMessages): TRequestMessages {
   return chatMessages.filter(message => {
+    // never drop protocol-bearing messages: tool_calls-only assistant messages have content:null,
+    // and each tool message pairs with a tool_call_id - removing either side orphans the other ("tool_call_id ... is not found")
+    if (message.role === 'assistant' && message.tool_calls?.length) return true;
+    if (message.role === 'tool') return true;
     const c = message.content;
     if (c === null || c === '') return false;
     if (typeof c === 'string' && !c.trim()) return false; // whitespace-only (e.g. '\n\n' from Anthropic)
@@ -500,6 +504,7 @@ function _fixVndOaiRestoreMarkdown_Inline(payload: TRequest) {
 function _toOpenAIMessages(openAIDialect: OpenAIDialects, systemMessage: AixMessages_SystemMessage | null, chatSequence: AixMessages_ChatMessage[], hotFixOpenAIo1Family: boolean): TRequestMessages {
 
   // [DeepSeek, 2026-04-24] V4 thinking-by-default - reasoning_content must round-trip on tool-call turns; payload is the 'ma' part's aText (unlike Gemini/OpenAI-Responses which carry opaque handles).
+  // [Moonshot] no echo needed: K3 (also thinking-by-default) accepts tool-call turns without reasoning_content (probe-verified 2026-07-18)
   const echoDeepseekReasoning = openAIDialect === 'deepseek';
 
   // [OpenRouter, 2026-07-10] OR translates Anthropic-style ephemeral breakpoints for paid-cache-write
@@ -603,7 +608,7 @@ function _toOpenAIMessages(openAIDialect: OpenAIDialects, systemMessage: AixMess
 
             case 'meta_cache_control':
               if (emitCacheBreakpoints)
-                _stampTrailingCacheBreakpoint(currentMessage);
+                _stampTrailingCacheBreakpoint(chatMessages);
               break;
 
             case 'meta_in_reference_to':
@@ -716,7 +721,7 @@ function _toOpenAIMessages(openAIDialect: OpenAIDialects, systemMessage: AixMess
 
             case 'meta_cache_control':
               if (emitCacheBreakpoints)
-                _stampTrailingCacheBreakpoint(currentMessage);
+                _stampTrailingCacheBreakpoint(chatMessages);
               break;
 
             default:
@@ -746,29 +751,39 @@ function _toOpenAIMessages(openAIDialect: OpenAIDialects, systemMessage: AixMess
 
 /**
  * [OpenRouter, 2026-07-10] Anthropic-style prompt caching: stamp an ephemeral breakpoint on the trailing
- * text part of the message assembled so far. Text parts only (per OR docs - images can't carry breakpoints),
+ * text part of the messages assembled so far. Text parts only (per OR docs - images can't carry breakpoints),
  * coercing string content to the array form, which is the only shape that can carry cache_control.
+ *
+ * Walks back across messages when the last one has no stampable text (image-only user messages,
+ * tool-calls-only assistant messages, meta-ref system messages): prompt caching is prefix-based, so
+ * stamping one block earlier still caches everything before it, which beats dropping the breakpoint.
  */
-function _stampTrailingCacheBreakpoint(message: TRequestMessages[number] | undefined): void {
+function _stampTrailingCacheBreakpoint(chatMessages: TRequestMessages): void {
 
-  if (!message || (message.role !== 'user' && message.role !== 'assistant'))
-    return console.warn('AIX: OpenAI-dispatch: cache breakpoint without a user/assistant message to attach to');
+  for (let m = chatMessages.length - 1; m >= 0; m--) {
+    const message = chatMessages[m];
 
-  // tool-calls-only assistant message: no content block to carry the breakpoint
-  if (message.content === null)
-    return console.warn('AIX: OpenAI-dispatch: cache breakpoint on a message without content');
+    // only user/assistant messages carry breakpoints (skips tool results and meta-ref system messages)
+    if (message.role !== 'user' && message.role !== 'assistant')
+      continue;
 
-  const contentParts = typeof message.content === 'string' ? [OpenAIWire_ContentParts.TextContentPart(message.content)] : message.content;
-  message.content = contentParts;
+    // tool-calls-only assistant message: no content block to carry the breakpoint
+    if (message.content === null)
+      continue;
 
-  for (let i = contentParts.length - 1; i >= 0; i--) {
-    const contentPart = contentParts[i];
-    if (contentPart.type === 'text') {
-      contentPart.cache_control = { type: 'ephemeral' };
-      return;
+    const contentParts = typeof message.content === 'string' ? [OpenAIWire_ContentParts.TextContentPart(message.content)] : message.content;
+
+    for (let i = contentParts.length - 1; i >= 0; i--) {
+      const contentPart = contentParts[i];
+      if (contentPart.type === 'text') {
+        message.content = contentParts;
+        contentPart.cache_control = { type: 'ephemeral' };
+        return;
+      }
     }
   }
-  console.warn('AIX: OpenAI-dispatch: cache breakpoint on a message without text parts');
+
+  console.warn('AIX: OpenAI-dispatch: cache breakpoint with no stampable text part in any preceding message');
 }
 
 /** FNV-1a 32-bit hex digest - tiny, deterministic, edge-safe; used to mint the OpenRouter sticky client session id. */
@@ -841,8 +856,11 @@ function _toOpenAIToolChoice(openAIDialect: OpenAIDialects, itp: AixTools_ToolsP
       return 'auto';
     case 'any':
       return 'required';
-    case 'function_call':
-      return { type: 'function' as const, function: { name: itp.function_call.name } };
+    // DISABLED 2026-07-17 - forced named tool, see ToolsPolicy_schema. [Moonshot] probe-verified: named tool_choice
+    // 400s ("tool_choice 'specified' is incompatible with thinking enabled") on all thinking-mode Kimi requests -
+    // always, on the K2.7-code/K3 always-thinking models; 'required' ('any') works.
+    // case 'function_call':
+    //   return { type: 'function' as const, function: { name: itp.function_call.name } };
   }
 }
 
