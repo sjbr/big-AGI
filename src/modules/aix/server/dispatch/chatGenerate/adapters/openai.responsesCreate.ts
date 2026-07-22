@@ -158,7 +158,7 @@ export function aixToOpenAIResponses(
 
   // Allow/deny auto-adding hosted tools when custom tools are present
   const hasCustomTools = chatGenerate.tools?.some(t => t.type === 'function_call');
-  const hasRestrictivePolicy = chatGenerate.toolsPolicy?.type === 'any' || chatGenerate.toolsPolicy?.type === 'function_call';
+  const hasRestrictivePolicy = chatGenerate.toolsPolicy?.type === 'any' /* || chatGenerate.toolsPolicy?.type === 'function_call' - DISABLED 2026-07-17, see ToolsPolicy_schema */;
   const skipHostedToolsDueToCustomTools = hasCustomTools && hasRestrictivePolicy;
 
   // Tool: Web Search: for search and deep research models
@@ -183,7 +183,7 @@ export function aixToOpenAIResponses(
       const webSearchTool: TRequestTool = model.id.includes('-deep-research') ? {
         type: 'web_search_preview', // HOTFIX for deep research models, which only seem to support the outdated 'web_search_preview' tool
       } : isDialectSakana ? {
-        type: 'web_search', // [Sakana.ai] bare tool only - advanced options (context size, location, access) are not supported
+        type: 'web_search', // [Sakana.ai] bare tool - context size is tolerated since ~2026-07 but undocumented (location/access unverified), so keep emitting bare
       } : {
         type: 'web_search',
         search_context_size: model.vndOaiWebSearchContext ?? undefined,
@@ -645,8 +645,9 @@ function _toOpenAIResponsesToolChoice(itp: AixTools_ToolsPolicy): NonNullable<TR
       return 'auto';
     case 'any':
       return 'required';
-    case 'function_call':
-      return { type: 'function' as const, name: itp.function_call.name };
+    // DISABLED 2026-07-17 - forced named tool, see ToolsPolicy_schema
+    // case 'function_call':
+    //   return { type: 'function' as const, name: itp.function_call.name };
     default:
       const _exhaustiveCheck: never = itpType;
       throw new Error(`Unsupported tools policy type: ${itpType}`);
