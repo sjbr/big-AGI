@@ -165,6 +165,7 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
     && openAIDialect !== 'openrouter' // OpenRouter has its own channeling of this
     && openAIDialect !== 'deepseek' && openAIDialect !== 'moonshot' && openAIDialect !== 'zai' // these map to thinking enabled/disabled (+ reasoning_effort passthrough) in the block below
     && openAIDialect !== 'alibaba' // Alibaba/Qwen ignores reasoning_effort; uses enable_thinking instead (block below)
+    && openAIDialect !== 'nvidianim' // NVIDIA rejects unknown params and gpt-oss strictly validates reasoning_effort - dedicated block below
     && openAIDialect !== 'perplexity' // Perplexity has its own block below with stricter validation
   ) {
     // for: 'azure' | 'groq' | 'lmstudio' | 'localai' | 'mistral' | 'openai' | 'togetherai' | 'xai'
@@ -177,7 +178,10 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
   if (reasoningEffort && (openAIDialect === 'deepseek' || openAIDialect === 'moonshot' || openAIDialect === 'zai')) {
     // [Z.ai, 2026-06-13] reasoning_effort is GLM-5.2 only; other GLM models are binary thinking enabled/disabled - https://docs.z.ai/api-reference/llm/chat-completion
     const supportsEffortLevels = openAIDialect === 'deepseek' || openAIDialect === 'moonshot' || (openAIDialect === 'zai' && model.id.startsWith('glm-5.2'));
-    const allowedEffort = openAIDialect === 'moonshot' ? ['none', 'low', 'high', 'max'] : supportsEffortLevels ? ['none', 'high', 'max'] : ['none', 'high'];
+    // [DeepSeek, 2026-07-31] the V4 reasoning_effort enum is none|minimal|low|medium|high|xhigh|max; we expose the
+    // documented low/high/max (+ none -> thinking disabled). 'low' keeps reasoning on while skipping the hidden agentic
+    // preamble, so it is the cheap thinking tier.
+    const allowedEffort = (openAIDialect === 'moonshot' || openAIDialect === 'deepseek') ? ['none', 'low', 'high', 'max'] : supportsEffortLevels ? ['none', 'high', 'max'] : ['none', 'high'];
     if (!allowedEffort.includes(reasoningEffort)) // domain validation
       throw new Error(`${openAIDialect} only supports reasoning effort ${allowedEffort.join(', ')}, got '${reasoningEffort}'`);
 
@@ -194,6 +198,19 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
   if (reasoningEffort && openAIDialect === 'alibaba')
     payload.enable_thinking = reasoningEffort !== 'none';
 
+  // [NVIDIA NIM, 2026-07-25] Two per-model reasoning mechanisms (NVIDIA rejects unknown top-level params, so we must be exact):
+  // - gpt-oss: native `reasoning_effort`, strictly validated to low|medium|high (llmVndOaiEffort spec narrows the UI to these)
+  // - other thinking models (Nemotron 3, etc.): binary toggle via vLLM `chat_template_kwargs` (llmVndMiscEffort ['none','high'];
+  //   the `thinking` inner key is verified on Nemotron 3 and accepted as a no-op template kwarg elsewhere)
+  if (reasoningEffort && openAIDialect === 'nvidianim') {
+    if (model.id.startsWith('openai/gpt-oss')) {
+      if (!['low', 'medium', 'high'].includes(reasoningEffort))
+        throw new Error(`NVIDIA gpt-oss models only support reasoning effort low, medium, high, got '${reasoningEffort}'`);
+      payload.reasoning_effort = reasoningEffort;
+    } else
+      payload.chat_template_kwargs = { thinking: reasoningEffort !== 'none' };
+  }
+
 
   // [OpenAI, 2026-02-04] Verbosity control - official OpenAI parameter (low/medium/high, default: medium)
   if (model.vndOaiVerbosity) {
@@ -207,6 +224,15 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
   const hasCustomTools = chatGenerate.tools?.some(t => t.type === 'function_call');
   const hasRestrictivePolicy = chatGenerate.toolsPolicy?.type === 'any' /* || chatGenerate.toolsPolicy?.type === 'function_call' - DISABLED 2026-07-17, see ToolsPolicy_schema */;
   const skipWebSearchDueToCustomTools = hasCustomTools && hasRestrictivePolicy;
+
+  // [DeepSeek, 2026-07-31] Forced tool calls 400 while thinking is on ("Thinking mode does not support this
+  // tool_choice", both v4 models), and thinking is the vendor default, so the default path fails outright. We disable
+  // thinking rather than downgrade to 'auto': the callers that force a tool need a parseable call, not prose. Only
+  // internal utility calls set a restrictive policy, so a user's own chat turn never loses reasoning here.
+  if (openAIDialect === 'deepseek' && hasRestrictivePolicy) {
+    payload.thinking = { type: 'disabled' };
+    delete payload.reasoning_effort;
+  }
 
   // Hosted tools
   // [OpenAI] Vendor-specific web search context and/or geolocation
@@ -354,6 +380,11 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
 
   // [OpenAI] o-family/reasoning models: remove temperature and top_p controls
   if (hotFixOpenAIOFamily)
+    payload = _fixRemoveTemperatureAndTopP(payload);
+
+  // [DeepSeek, 2026-07-31] thinking mode silently ignores temperature/top_p - drop them instead of sending inert
+  // fields. After the tools block, which may have turned thinking off; when off they work normally and are kept.
+  if (openAIDialect === 'deepseek' && payload.thinking?.type !== 'disabled')
     payload = _fixRemoveTemperatureAndTopP(payload);
 
   if (hotFixRemoveStreamOptions)
