@@ -5,7 +5,7 @@ import type { OpenAIDialects } from '~/modules/llms/server/openai/openai.access'
 import { AixAPI_Model, AixAPIChatGenerate_Request, AixMessages_ChatMessage, AixMessages_SystemMessage, AixParts_DocPart, AixParts_InlineAudioPart, AixParts_MetaInReferenceToPart, AixTools_ToolDefinition, AixTools_ToolsPolicy } from '../../../api/aix.wiretypes';
 import { OpenAIWire_API_Chat_Completions, OpenAIWire_ContentParts, OpenAIWire_Messages } from '../../wiretypes/openai.wiretypes';
 
-import { aixSpillShallFlush, aixSpillSystemToUser, approxDocPart_To_String } from './adapters.common';
+import { AIX_MISSING_TOOL_RESULT_TEXT, aixSpillShallFlush, aixSpillSystemToUser, approxDocPart_To_String } from './adapters.common';
 
 
 //
@@ -62,6 +62,9 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
 
   // Convert the chat messages to the OpenAI 4-Messages format
   let chatMessages = _toOpenAIMessages(openAIDialect, chatGenerate.systemMessage, chatGenerate.chatSequence, hotFixOpenAIOFamily);
+
+  // Pair every interior tool call with a tool message, or the request is rejected wholesale
+  _fixPairInteriorToolCalls(chatMessages);
 
   // Apply hotfixes
 
@@ -195,8 +198,15 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
 
   // [Alibaba, 2026-06-26] Qwen thinking control via 'enable_thinking' (binary). Verified on compatible-mode for qwen3.x + DashScope-hosted DeepSeek-V4/GLM-5.2.
   // Models exposing this use a `llmVndMiscEffort` spec with enumValues ['none','high'] -> Off/On (unset = Default = vendor default, usually on).
-  if (reasoningEffort && openAIDialect === 'alibaba')
+  // [Alibaba, 2026-08-14] DashScope-hosted DeepSeek also validates + honors 'reasoning_effort' (accepts low|medium|high|xhigh|max,
+  // rejects minimal): live-probed the same 3 template tiers as DeepSeek-direct ({low} < {medium,high,xhigh} < {max}, via the hidden
+  // preamble prompt-token fingerprint; flash-0731 collapses max onto high). We add it only for the beyond-binary values, so
+  // binary-spec models (Qwen etc., enumValues ['none','high']) can never emit it; 'high' == thinking-on default, toggle suffices.
+  if (reasoningEffort && openAIDialect === 'alibaba') {
     payload.enable_thinking = reasoningEffort !== 'none';
+    if (reasoningEffort === 'low' || reasoningEffort === 'max')
+      payload.reasoning_effort = reasoningEffort;
+  }
 
   // [NVIDIA NIM, 2026-07-25] Two per-model reasoning mechanisms (NVIDIA rejects unknown top-level params, so we must be exact):
   // - gpt-oss: native `reasoning_effort`, strictly validated to low|medium|high (llmVndOaiEffort spec narrows the UI to these)
@@ -454,6 +464,40 @@ function _fixAlternateUserAssistantRoles(chatMessages: TRequestMessages): TReque
     acc.push(historyItem);
     return acc;
   }, [] as TRequestMessages);
+}
+
+/**
+ * Anti-wedge: an assistant `tool_calls` entry with no `tool` message answering its id is a 400
+ * ("An assistant message with 'tool_calls' must be followed by tool messages responding to each
+ * tool_call_id") that rejects the whole request. The orphan lives in stored history (a run that
+ * failed/aborted before the tool ran, or a tool no client processor claimed), so every later turn
+ * replays it and gets the same 400 - the conversation is bricked until the message is deleted.
+ *
+ * Synthesizes the stub prescribed in kb/modules/AIX-stateless-roundtrip-retention.md (cat-1), which
+ * also retro-heals conversations already poisoned in users' stores. No-op when well-formed.
+ * The LAST message is skipped: a trailing tool call is the in-flight call of an agentic loop.
+ */
+function _fixPairInteriorToolCalls(chatMessages: TRequestMessages): void {
+  for (let i = 0; i < chatMessages.length - 1; i++) {
+    const message = chatMessages[i];
+    if (message.role !== 'assistant' || !message.tool_calls?.length) continue;
+
+    // the results are the run of 'tool' messages right after this assistant message
+    const answeredIds = new Set<string>();
+    let insertAt = i + 1;
+    for (; insertAt < chatMessages.length; insertAt++) {
+      const next = chatMessages[insertAt];
+      if (next.role !== 'tool') break;
+      answeredIds.add(next.tool_call_id);
+    }
+
+    const orphanIds = message.tool_calls.map(tc => tc.id).filter(id => !answeredIds.has(id));
+    if (!orphanIds.length) continue;
+
+    // append to the existing run, in tool_calls order, so all results stay contiguous after the call
+    console.warn(`[OpenAI] Pairing ${orphanIds.length} orphan tool call(s) with a placeholder tool message (messages.${i})`);
+    chatMessages.splice(insertAt, 0, ...orphanIds.map(id => OpenAIWire_Messages.ToolMessage(id, AIX_MISSING_TOOL_RESULT_TEXT)));
+  }
 }
 
 function _fixRemoveEmptyMessages(chatMessages: TRequestMessages): TRequestMessages {
