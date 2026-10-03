@@ -1,9 +1,10 @@
 import { safeErrorString } from '~/server/wire';
 
 import { hasKeys } from '~/common/util/objectUtils';
+import { usdToCents } from '~/common/util/costUtils';
 
-import type { AixWire_Particles } from '../../../api/aix.wiretypes';
-import type { ChatGenerateParseFunction } from '../chatGenerate.dispatch';
+import type { AixWire_Particles, AixWire_Vendors } from '../../../api/aix.wiretypes';
+import type { ChatGenerateParseContext, ChatGenerateParseFunction } from '../chatGenerate.dispatch';
 import type { IParticleTransmitter } from './IParticleTransmitter';
 import { AIX_OAI_DEFAULT_IMAGE_GEN_MODEL } from '../adapters/openai.responsesCreate';
 import { IssueSymbols } from '../ChatGenerateTransmitter';
@@ -12,6 +13,7 @@ import { openAIUpstreamErrorLogLevel } from './openai.error-severity';
 import { stripXAIDefectiveCitations, XAIDefectiveCitationsFilter } from './xai.transform-citationsLeak';
 
 import { OpenAIWire_API_Responses, OpenAIWire_Responses_Tools } from '../../wiretypes/openai.wiretypes';
+import { OperationRetrySignal } from '../chatGenerate.operation-retry';
 
 
 // configuration
@@ -82,9 +84,32 @@ function _findImageGenToolCfg(tools: TResponse['tools']): TImageGenToolCfg | und
  * parser needs no such check, as it emits content from this same .output.
  * Empirical 2026-07-03 (5/5 GPT-5.5 Pro + web_search repros); same upstream behavior independently hit by
  * vercel/ai#6534 and openai/codex#10055.
+ *
+ * Only the LAST output item counts (#1208): a message that completed and was then followed by more items (a
+ * hosted code_interpreter_call, a function_call, ...) is an intermediate step, not the answer - the failure cut
+ * the turn short, and salvaging it rendered a truncated reply as a clean success with no usage and no error.
  */
 function _isSalvageableFailedOutput(output: TResponse['output']): boolean {
-  return OPENAI_RESPONSES_SALVAGE_FAILED && output.some(item => item.type === 'message' && item.status === 'completed');
+  if (!OPENAI_RESPONSES_SALVAGE_FAILED || !output.length) return false;
+  const lastItem = output[output.length - 1];
+  return lastItem.type === 'message' && lastItem.status === 'completed';
+}
+
+/**
+ * HTTP-equivalent status of a transient in-band error worth an operation retry (like Anthropic's overloaded_error), or undefined.
+ * #1210 shape: { type: 'invalid_request_error', code: 'rate_limit_exceeded', message: "We're currently processing too many requests - please try again later." }
+ * No denylist: in-band errors on a 200 stream are past admission (auth, quota, size); HTTP-level ones are retried before the parser runs.
+ *
+ * The name of the failure sits in `code` or in `type` depending on the carrier: the 'response.failed' error object
+ * is { code, message } (code: 'server_error'), the 'error' event and the HTTP bodies also have a `type`.
+ */
+function _transientErrorToHttpStatus(error: null | undefined | { type?: string | null, code?: string | number | null, message?: string | null }): 429 | 500 | 529 | undefined {
+  const names = [error?.code, error?.type];
+  if (names.includes('rate_limit_exceeded') || /processing too many requests/i.test(error?.message || '')) return 429;
+  // OpenAI's overload pair, documented as an HTTP 503: reported as 529, our status for the 'overloaded' retry class (a bare 503 reads as transient)
+  if (names.includes('server_is_overloaded') || names.includes('service_unavailable_error')) return 529;
+  if (names.includes('server_error')) return 500;
+  return undefined;
 }
 
 
@@ -178,6 +203,10 @@ class ResponseParserStateMachine {
     if (diff)
       console.warn(`[DEV] AIX: ${label}: response differs:`, { diff, excludedFields: excludeFields });
     return !!diff;
+  }
+
+  get responseModel() {
+    return this.#response?.model;
   }
 
   get responseId() {
@@ -319,19 +348,19 @@ class ResponseParserStateMachine {
 /**
  * OpenAI Responses API Streaming Parser
  *
- * @param vendor 'openai' (default) or 'xai' - tags the reasoning continuity handle so it round-trips back
- *   to the SAME provider. The OpenAI Responses wire format is shared with xAI, but the encrypted_content blob
+ * @param rspVendor the Responses vendor (AixWire_Vendors.RSP_VENDORS) - tags the reasoning continuity handle so it round-trips back
+ *   to the SAME provider. The OpenAI Responses wire format is shared with xAI and Meta, but the encrypted_content blob
  *   and the rs_... id are vendor-server-private (different keys, different state). Mixing them produces
  *   "Item with id rs_... not found" or worse silent corruption.
  */
-export function createOpenAIResponsesEventParser(vendor: 'openai' | 'xai'): ChatGenerateParseFunction {
+export function createOpenAIResponsesEventParser(rspVendor: AixWire_Vendors.RspVendor): ChatGenerateParseFunction {
 
   const R = new ResponseParserStateMachine();
 
   // [xAI] grok-4.6 leaks internal citation directives into web_search answer text - strip them (see xai.transform-citationsLeak.ts)
-  const xaiCitationsFilter = vendor === 'xai' ? new XAIDefectiveCitationsFilter() : undefined;
+  const xaiCitationsFilter = rspVendor === 'xai' ? new XAIDefectiveCitationsFilter() : undefined;
 
-  return function(pt: IParticleTransmitter, eventData: string) {
+  return function(pt: IParticleTransmitter, eventData: string, _eventName?: string, context?: ChatGenerateParseContext) {
 
     // throws on malformed event data
     const chunkData = JSON.parse(eventData);
@@ -402,7 +431,7 @@ export function createOpenAIResponsesEventParser(vendor: 'openai' | 'xai'): Chat
 
       case 'response.completed':
         // CHANGE of { ..fields.. } expected
-        R.setResponse(eventType, event.response, ['status', 'output', 'usage' /*, 'service_tier', 'completed_at' (not yet parsed) */]);
+        R.setResponse(eventType, event.response, ['status', 'output', 'usage', 'service_tier', 'tool_usage' /*, 'completed_at' (not parsed) */]); // service_tier settles ('auto' -> served tier) and tool_usage fills in along the way
 
         // -> Status: determine stop reason based on streamed content
         pt.setTokenStopReason(R.hasFunctionCalls ? 'ok-tool_invocations' : 'ok');
@@ -411,7 +440,7 @@ export function createOpenAIResponsesEventParser(vendor: 'openai' | 'xai'): Chat
         // TODO: verify that we correctly captured all the outputs?
 
         // -> Metrics: timing always, tokens only when the usage block carries them (#1149)
-        pt.updateMetrics(_fromResponseMetrics(event.response.usage, R.parserCreationTimestamp, R.timeToFirstEvent));
+        pt.updateMetrics(_fromResponseMetrics(event.response, R.parserCreationTimestamp, R.timeToFirstEvent));
 
         // -> End of the response
         R.markResponseSealed();
@@ -424,7 +453,7 @@ export function createOpenAIResponsesEventParser(vendor: 'openai' | 'xai'): Chat
         R.markResponseSealed();
 
         // -> Metrics: timing always, even on failure (#1149; wrapped-failed responses carry usage: null)
-        pt.updateMetrics(_fromResponseMetrics(event.response.usage, R.parserCreationTimestamp, R.timeToFirstEvent));
+        pt.updateMetrics(_fromResponseMetrics(event.response, R.parserCreationTimestamp, R.timeToFirstEvent));
 
         // #1149 salvage: completed message + streamed text -> success (see _isSalvageableFailedOutput)
         const failedError = event.response.error;
@@ -435,31 +464,35 @@ export function createOpenAIResponsesEventParser(vendor: 'openai' | 'xai'): Chat
           break;
         }
 
-        // Genuine failure: surface the error
+        const failedText = !failedError ? 'Response failed with no error details.'
+          : `${safeErrorString(failedError.code) || 'Error'}: ${safeErrorString(failedError.message) || 'unknown.'}`;
+
+        // Genuine failure: retry if transient (the deferred mid-stream 'error' lands here when the message didn't complete), else surface the error
+        const failedRetryHttpStatus = _transientErrorToHttpStatus(failedError);
+        if (failedRetryHttpStatus && context?.hasRetriesForHttpStatus(failedRetryHttpStatus))
+          throw new OperationRetrySignal(failedText, { causeHttp: failedRetryHttpStatus, causeConn: failedError?.code });
+
         pt.setTokenStopReason('cg-issue');
-        pt.setDialectTerminatingIssue(!failedError ? 'Response failed with no error details.'
-          : `${safeErrorString(failedError.code) || 'Error'}: ${safeErrorString(failedError.message) || 'unknown.'}`, IssueSymbols.Generic, openAIUpstreamErrorLogLevel(failedError));
+        pt.setDialectTerminatingIssue(failedText, IssueSymbols.Generic, openAIUpstreamErrorLogLevel(failedError));
         break;
       }
 
       case 'response.incomplete':
-        // TODO: We haven't seen one of those events yet; we need to see what happens and parse it!
         R.setResponse(eventType, event.response);
         R.markResponseSealed();
 
         // -> Metrics: timing always, tokens when the usage block carries them (#1149)
-        pt.updateMetrics(_fromResponseMetrics(event.response.usage, R.parserCreationTimestamp, R.timeToFirstEvent));
+        pt.updateMetrics(_fromResponseMetrics(event.response, R.parserCreationTimestamp, R.timeToFirstEvent));
 
-        // -> Status: handle incomplete response
-        if (event.response.incomplete_details?.reason === 'max_output_tokens')
+        // -> Status: the reason decides how the client renders the cut (#1208: never as a clean finish)
+        const incompleteReason = event.response.incomplete_details?.reason;
+        if (incompleteReason === 'max_output_tokens')
           pt.setTokenStopReason('out-of-tokens');
-        else
-          pt.setTokenStopReason(R.hasFunctionCalls ? 'ok-tool_invocations' : 'ok');
-
-        // NOTE: disable notification for now, but server-side log it to detect more stop reasons
-        if (event.response.incomplete_details?.reason !== 'max_output_tokens') {
-          // pt.appendText(`**Incomplete response**: the response was incomplete because ${event.response.incomplete_details.reason || 'unknown reason'}\n`);
-          console.warn('[DEV] AIX: FIXME: OpenAI-Response Incomplete:', { incomplete_details: event.response.incomplete_details });
+        else if (incompleteReason === 'content_filter')
+          pt.setTokenStopReason('filter-content');
+        else {
+          pt.setTokenStopReason('cg-issue');
+          pt.setDialectTerminatingIssue(`Incomplete response${incompleteReason ? `: ${safeErrorString(incompleteReason)}` : ''}.`, IssueSymbols.Generic, 'srv-warn');
         }
         break;
 
@@ -476,7 +509,7 @@ export function createOpenAIResponsesEventParser(vendor: 'openai' | 'xai'): Chat
         if (event.item.type === 'message') {
           const messagePhase = event.item.phase;
           if (messagePhase === 'commentary' || messagePhase === 'final_answer')
-            pt.sendSetVendorState({ p: 'svs', vendor: vendor, state: { messagePhase } });
+            pt.sendSetVendorState({ p: 'svs', vendor: rspVendor, state: { messagePhase } });
         }
         break;
 
@@ -503,18 +536,18 @@ export function createOpenAIResponsesEventParser(vendor: 'openai' | 'xai'): Chat
             // - neither: nothing to round-trip
             // [DEV] surface divergences from this contract
             if (!reasoningId && !reasoningEC)
-              console.warn(`[DEV] AIX: ${vendor} Responses: reasoning item done with neither id nor encrypted_content - no continuity handle captured for this turn`, { doneItem });
+              console.warn(`[DEV] AIX: ${rspVendor} Responses: reasoning item done with neither id nor encrypted_content - no continuity handle captured for this turn`, { doneItem });
             else if (!reasoningEC)
-              console.log(`[DEV] AIX: ${vendor} Responses: reasoning item done has id but no encrypted_content - dropping handle (stateless round-trip requires include:['reasoning.encrypted_content'] on the request)`);
+              console.log(`[DEV] AIX: ${rspVendor} Responses: reasoning item done has id but no encrypted_content - dropping handle (stateless round-trip requires include:['reasoning.encrypted_content'] on the request)`);
             else if (!reasoningId)
-              console.log(`[DEV] AIX: ${vendor} Responses: reasoning item done has encrypted_content but no id - dropping handle (incomplete reasoning item from upstream)`);
+              console.log(`[DEV] AIX: ${rspVendor} Responses: reasoning item done has encrypted_content but no id - dropping handle (incomplete reasoning item from upstream)`);
 
             if (reasoningEC && reasoningId) {
               // Defensive: ensure an ma fragment exists as the attach target for the svs particle below.
               pt.appendReasoningText('');
               pt.sendSetVendorState({
                 p: 'svs',
-                vendor: vendor,
+                vendor: rspVendor,
                 state: {
                   reasoningItem: {
                     id: reasoningId,
@@ -557,7 +590,7 @@ export function createOpenAIResponsesEventParser(vendor: 'openai' | 'xai'): Chat
                 _imageGenerationMimeType(doneItem), // infer from output_format echoed in the item
                 igResult,
                 igRevisedPrompt || 'Generated image',
-                R.imageGenToolCfg?.model || AIX_OAI_DEFAULT_IMAGE_GEN_MODEL, // generator: prefer the cached tool config, fallback to current default
+                R.imageGenToolCfg?.model || R.responseModel || AIX_OAI_DEFAULT_IMAGE_GEN_MODEL, // generator: the cached tool config, else the responding model ([Meta AI] muse-image-1.0 echoes no tools), else the OpenAI default
                 igRevisedPrompt || '', // prompt used
               );
             else
@@ -828,8 +861,12 @@ export function createOpenAIResponsesEventParser(vendor: 'openai' | 'xai'): Chat
           break;
         }
 
+        // Transient and retries left: unwind to the operation retrier (#1210)
+        const retryHttpStatus = _transientErrorToHttpStatus(event.error ?? event);
+        if (retryHttpStatus && context?.hasRetriesForHttpStatus(retryHttpStatus))
+          throw new OperationRetrySignal(errorText, { causeHttp: retryHttpStatus, causeConn: errorCode });
+
         // Nothing to salvage - fail now (and seal, so the trailing 'response.failed' echo doesn't re-report)
-        // FIXME: potential point for throwing OperationRetrySignal
         R.markResponseSealed();
         pt.updateMetrics(_fromResponseMetrics(undefined, R.parserCreationTimestamp, R.timeToFirstEvent)); // timing even on failure (#1149)
         pt.setTokenStopReason('cg-issue');
@@ -875,20 +912,20 @@ export function createOpenAIResponsesEventParser(vendor: 'openai' | 'xai'): Chat
 /**
  * OpenAI Responses API Non-Streaming Parser
  *
- * @param vendor 'openai' (default) or 'xai' - see createOpenAIResponsesEventParser for the rationale on
- *   why xAI gets its own _vnd namespace (different encryption keys + private item ids).
+ * @param rspVendor the Responses vendor (AixWire_Vendors.RSP_VENDORS) - see createOpenAIResponsesEventParser for the rationale on
+ *   why each vendor gets its own _vnd namespace (different encryption keys + private item ids).
  */
-export function createOpenAIResponseParserNS(vendor: 'openai' | 'xai'): ChatGenerateParseFunction {
+export function createOpenAIResponseParserNS(rspVendor: AixWire_Vendors.RspVendor): ChatGenerateParseFunction {
 
   const parserCreationTimestamp = Date.now();
 
-  return function(pt: IParticleTransmitter, eventData: string) {
+  return function(pt: IParticleTransmitter, eventData: string, _eventName?: string, context?: ChatGenerateParseContext) {
 
     // Throws on malformed event data
     const responseData = JSON.parse(eventData);
 
     // .error: transmits upstream errors pre-parsing (object wouldn't be valid)
-    if (_forwardResponseError(responseData, pt)) {
+    if (_forwardResponseErrorNS(responseData, pt, context)) {
       pt.updateMetrics({ dtAll: Date.now() - parserCreationTimestamp }); // timing even on failure (#1149)
       return;
     }
@@ -911,7 +948,7 @@ export function createOpenAIResponseParserNS(vendor: 'openai' | 'xai'): ChatGene
     // NOTE: we don't do it for full responses, because they're supposed to be 'complete' - i.e. no 'background' execution
 
     // -> Metrics: timing always, tokens only when the usage block carries them (#1149)
-    pt.updateMetrics(_fromResponseMetrics(response.usage, parserCreationTimestamp, undefined));
+    pt.updateMetrics(_fromResponseMetrics(response, parserCreationTimestamp, undefined));
 
     // -> Status
 
@@ -928,9 +965,13 @@ export function createOpenAIResponseParserNS(vendor: 'openai' | 'xai'): ChatGene
         // pedantic check (.incomplete_details)
         if (response.incomplete_details && typeof response.incomplete_details === 'object') {
 
-          // override stop reason for max_output_tokens
+          // override the stop reason: out of tokens, filtered, else a generic issue (#1208: never a clean finish)
           if (response.incomplete_details.reason === 'max_output_tokens')
             tokenStopReason = 'out-of-tokens';
+          else if (response.incomplete_details.reason === 'content_filter')
+            tokenStopReason = 'filter-content';
+          else
+            tokenStopReason = 'cg-issue';
 
           // append the incomplete details as text
           pt.appendText(`**Incomplete response**: the response was incomplete because ${response.incomplete_details?.reason || 'unknown reason'}\n`);
@@ -1021,11 +1062,11 @@ export function createOpenAIResponseParserNS(vendor: 'openai' | 'xai'): ChatGene
 
           // [DEV] surface cases that diverge from our continuity round-trip expectations (see streaming path for rationale)
           if (!reasoningId && !reasoningEC)
-            console.warn(`[DEV] AIX: ${vendor}-Response-NS: reasoning item has neither id nor encrypted_content - no continuity handle captured for this turn`, { oItem });
+            console.warn(`[DEV] AIX: ${rspVendor}-Response-NS: reasoning item has neither id nor encrypted_content - no continuity handle captured for this turn`, { oItem });
           else if (!reasoningEC)
-            console.log(`[DEV] AIX: ${vendor}-Response-NS: reasoning item has id but no encrypted_content - dropping handle (stateless round-trip requires include:['reasoning.encrypted_content'] on the request)`);
+            console.log(`[DEV] AIX: ${rspVendor}-Response-NS: reasoning item has id but no encrypted_content - dropping handle (stateless round-trip requires include:['reasoning.encrypted_content'] on the request)`);
           else if (!reasoningId)
-            console.log(`[DEV] AIX: ${vendor}-Response-NS: reasoning item has encrypted_content but no id - dropping handle (incomplete reasoning item from upstream)`);
+            console.log(`[DEV] AIX: ${rspVendor}-Response-NS: reasoning item has encrypted_content but no id - dropping handle (incomplete reasoning item from upstream)`);
 
           // Capture ONLY when both id and encryptedContent are present (canonical, complete handle).
           if (reasoningEC && reasoningId) {
@@ -1033,7 +1074,7 @@ export function createOpenAIResponseParserNS(vendor: 'openai' | 'xai'): ChatGene
             pt.appendReasoningText('');
             pt.sendSetVendorState({
               p: 'svs',
-              vendor: vendor,
+              vendor: rspVendor,
               state: {
                 reasoningItem: {
                   id: reasoningId,
@@ -1061,7 +1102,7 @@ export function createOpenAIResponseParserNS(vendor: 'openai' | 'xai'): ChatGene
 
           // [gpt-5.4+] forward the message phase before the item's text (mirrors the streaming path)
           if (messagePhase === 'commentary' || messagePhase === 'final_answer')
-            pt.sendSetVendorState({ p: 'svs', vendor: vendor, state: { messagePhase } });
+            pt.sendSetVendorState({ p: 'svs', vendor: rspVendor, state: { messagePhase } });
 
           // Message
           for (const content of messageContent) {
@@ -1069,7 +1110,7 @@ export function createOpenAIResponseParserNS(vendor: 'openai' | 'xai'): ChatGene
             switch (contentType) {
               case 'output_text':
                 // [xAI] strip leaked citation directives (see xai.transform-citationsLeak.ts)
-                pt.appendText(vendor === 'xai' ? stripXAIDefectiveCitations(content.text || '') : (content.text || ''));
+                pt.appendText(rspVendor === 'xai' ? stripXAIDefectiveCitations(content.text || '') : (content.text || ''));
 
                 // -> URL Citations: Parse annotations if present
                 if (content.annotations && Array.isArray(content.annotations))
@@ -1120,7 +1161,7 @@ export function createOpenAIResponseParserNS(vendor: 'openai' | 'xai'): ChatGene
               _imageGenerationMimeType(oItem), // infer from output_format echoed in the item
               igResult,
               igRevisedPrompt || 'Generated image',
-              imageGenToolCfg?.model || AIX_OAI_DEFAULT_IMAGE_GEN_MODEL, // generator: read from echoed tools (API does not echo model per-item), fallback to current default
+              imageGenToolCfg?.model || response.model || AIX_OAI_DEFAULT_IMAGE_GEN_MODEL, // generator: the echoed tools (the API does not echo the model per item), else the responding model ([Meta AI] muse-image-1.0 echoes no tools), else the OpenAI default
               igRevisedPrompt || '', // prompt used
             );
           else
@@ -1157,7 +1198,8 @@ export function createOpenAIResponseParserNS(vendor: 'openai' | 'xai'): ChatGene
 }
 
 
-function _fromResponseMetrics(usage: OpenAIWire_API_Responses.Response['usage'], parserCreationTimestamp: number, timeToFirstEvent: number | undefined): AixWire_Particles.CGSelectMetrics {
+function _fromResponseMetrics(response: Pick<OpenAIWire_API_Responses.Response, 'model' | 'usage' | 'service_tier' | 'tool_usage'> | undefined, parserCreationTimestamp: number, timeToFirstEvent: number | undefined): AixWire_Particles.CGSelectMetrics {
+  const usage = response?.usage;
 
   // Time Metrics - measured locally (parser-creation -> now), independent of the upstream `usage` block.
   // Emitted UNCONDITIONALLY: long-running Responses models (o-series `-pro`, deep-research, background
@@ -1183,13 +1225,20 @@ function _fromResponseMetrics(usage: OpenAIWire_API_Responses.Response['usage'],
 
   // Input Metrics
 
-  // Input redistribution: Cache Read
+  // Input redistribution: Cache Read, Cache Write (input_tokens is inclusive of both)
   if (usage.input_tokens_details) {
     const TCacheRead = usage.input_tokens_details.cached_tokens;
     if (TCacheRead !== undefined && TCacheRead > 0) {
       metricsUpdate.TCacheRead = TCacheRead;
       if (metricsUpdate.TIn !== undefined)
         metricsUpdate.TIn -= TCacheRead;
+    }
+    // GPT-5.6+ written tokens (priced by cache.write)
+    const TCacheWrite = usage.input_tokens_details.cache_write_tokens;
+    if (TCacheWrite && TCacheWrite > 0) {
+      metricsUpdate.TCacheWrite = TCacheWrite;
+      if (metricsUpdate.TIn !== undefined)
+        metricsUpdate.TIn -= TCacheWrite;
     }
   }
 
@@ -1206,13 +1255,47 @@ function _fromResponseMetrics(usage: OpenAIWire_API_Responses.Response['usage'],
 
   // TODO: Output breakdown: Audio
 
+  // per-call server tools: web searches (OpenAI tool_usage, xAI web + X search)
+  const webSearches = (response?.tool_usage?.web_search?.num_requests ?? 0)
+    + (usage.server_side_tool_usage_details?.web_search_calls ?? 0)
+    + (usage.server_side_tool_usage_details?.x_search_calls ?? 0);
+  if (webSearches > 0)
+    metricsUpdate.nWebSearch = webSearches;
+
+  // [xAI] exact charge (1 tick = 1e-10 USD)
+  if (typeof usage.cost_in_usd_ticks === 'number')
+    metricsUpdate.$cReported = usdToCents(usage.cost_in_usd_ticks / 1e10);
+
+  // served tier -> confirmed multiplier; unknown tiers stay on the parameter side
+  const $xPrice = _priceMultiplierFromServiceTier(response?.service_tier, response?.model);
+  if ($xPrice !== undefined)
+    metricsUpdate.$xPrice = $xPrice;
+
   return metricsUpdate;
+}
+
+function _priceMultiplierFromServiceTier(serviceTier: string | null | undefined, modelId: string | undefined): number | undefined {
+  switch (serviceTier) {
+    case 'default':
+      return 1;
+    case 'flex':
+      return 0.5;
+    case 'priority':
+    case 'fast':
+      // 2x on every model exposing llmVndOaiServiceTier, except GPT-5.5 at 2.5x (Fast $12.50/$75 vs Standard $5/$30)
+      return modelId?.startsWith('gpt-5.5') ? 2.5 : 2;
+    case 'ultrafast':
+      // [2026-09-29] 6x on every token class, both context tiers (GPT-6 Astra: $60/$6/$75/$300 vs Standard $10/$1/$12.50/$50)
+      return 6;
+    default: // 'auto', absent
+      return undefined;
+  }
 }
 
 /**
  * If there's an error in the pre-decoded message, push it down to the particle transmitter.
  */
-function _forwardResponseError(parsedData: any, pt: IParticleTransmitter) {
+function _forwardResponseErrorNS(parsedData: any, pt: IParticleTransmitter, context?: ChatGenerateParseContext) {
 
   // operate on .error
   if (!parsedData || !parsedData.error) return false;
@@ -1230,9 +1313,15 @@ function _forwardResponseError(parsedData: any, pt: IParticleTransmitter) {
   if (Array.isArray(parsedData.output) && _isSalvageableFailedOutput(parsedData.output))
     return false;
 
+  const errorText = safeErrorString(error) || 'unknown.';
+
+  // Transient and retries left: unwind to the operation retrier (#1210)
+  const retryHttpStatus = _transientErrorToHttpStatus(error);
+  if (retryHttpStatus && context?.hasRetriesForHttpStatus(retryHttpStatus))
+    throw new OperationRetrySignal(errorText, { causeHttp: retryHttpStatus, causeConn: typeof error.code === 'string' ? error.code : undefined });
+
   // Transmit the error as text - note: throw if you want to transmit as 'error'
-  // FIXME: potential point for throwing OperationRetrySignal
-  pt.setDialectTerminatingIssue(safeErrorString(error) || 'unknown.', IssueSymbols.Generic, openAIUpstreamErrorLogLevel(error));
+  pt.setDialectTerminatingIssue(errorText, IssueSymbols.Generic, openAIUpstreamErrorLogLevel(error));
   return true;
 }
 
@@ -1298,17 +1387,21 @@ function _prettyImageGenConfigSuffix(cfg: TImageGenToolCfg | undefined): string 
 /**
  * Infers the mime type from the image_generation_call output item's output_format field.
  * The API echoes the output_format in the done item (e.g. 'png', 'webp', 'jpeg').
+ * [Meta AI] muse-image-1.0 echoes no output_format (and defaults to webp): sniff the base64 magic instead.
  */
-function _imageGenerationMimeType(item: { output_format?: string }): string {
+function _imageGenerationMimeType(item: { output_format?: string, result?: string }): string {
   switch (item?.output_format) {
     case 'webp':
       return 'image/webp';
     case 'jpeg':
       return 'image/jpeg';
     case 'png':
-    default:
       return 'image/png';
   }
+  const b64Head = item?.result?.slice(0, 5) ?? '';
+  if (b64Head.startsWith('UklGR')) return 'image/webp'; // 'RIFF....WEBP'
+  if (b64Head.startsWith('/9j/')) return 'image/jpeg'; // 0xFF 0xD8 0xFF
+  return 'image/png'; // 'iVBOR' (0x89 'PNG'), and the OpenAI default
 }
 
 /**

@@ -18,7 +18,7 @@ const DEV_DEBUG_GROQ_MODELS = Release.IsNodeDevBuild; // not in staging to reduc
  * - models list: https://console.groq.com/docs/models
  * - pricing: the per-model card PRICING block, e.g. https://console.groq.com/docs/model/openai/gpt-oss-120b (groq.com/pricing is JS-rendered, no table)
  * - deprecations (shutdown dates + replacements): https://console.groq.com/docs/deprecations
- * - updated: 2026-08-31
+ * - updated: 2026-09-14
  */
 type _GroqModelDef = (KnownModel & { pubDate: string }) | KnownLink;
 
@@ -112,7 +112,7 @@ const _knownGroqModels = llmsDefineModels<_GroqModelDef>()([
     parameterSpecs: [
       { paramId: 'llmVndOaiEffort', enumValues: ['low', 'medium', 'high'] }, // Groq rejects 'none' on gpt-oss
     ],
-    chatPrice: { input: 0.15, output: 0.60, cache: { cType: 'oai-ac', read: 0.075 } },
+    chatPrice: { input: 0.15, output: 0.60, cache: { read: 0.075 } },
     benchmark: { cbaElo: 1352 }, // lmarena: gpt-oss-120b
   },
   {
@@ -127,7 +127,7 @@ const _knownGroqModels = llmsDefineModels<_GroqModelDef>()([
     parameterSpecs: [
       { paramId: 'llmVndOaiEffort', enumValues: ['low', 'medium', 'high'] }, // Groq rejects 'none' on gpt-oss
     ],
-    chatPrice: { input: 0.075, output: 0.30, cache: { cType: 'oai-ac', read: 0.0375 } },
+    chatPrice: { input: 0.075, output: 0.30, cache: { read: 0.0375 } },
   },
   {
     idPrefix: 'openai/gpt-oss-20b',
@@ -140,7 +140,7 @@ const _knownGroqModels = llmsDefineModels<_GroqModelDef>()([
     parameterSpecs: [
       { paramId: 'llmVndOaiEffort', enumValues: ['low', 'medium', 'high'] }, // Groq rejects 'none' on gpt-oss
     ],
-    chatPrice: { input: 0.075, output: 0.30, cache: { cType: 'oai-ac', read: 0.0375 } },
+    chatPrice: { input: 0.075, output: 0.30, cache: { read: 0.0375 } },
     benchmark: { cbaElo: 1318 }, // lmarena: gpt-oss-20b
   },
 

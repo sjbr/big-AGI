@@ -20,11 +20,13 @@ import { getLLMContextTokens, LLM_IF_ANT_PromptCaching, LLM_IF_OAI_Vision } from
 import { OptimaDrawerIn, OptimaPanelIn, OptimaToolbarIn } from '~/common/layout/optima/portals/OptimaPortalsIn';
 import { PanelResizeInset } from '~/common/components/PanelResizeInset';
 import { Release } from '~/common/app.release';
+import { RenderDecayZone } from '~/common/render-decay/RenderDecayZone';
 import { ScrollToBottom } from '~/common/scroll-to-bottom/ScrollToBottom';
 import { ScrollToBottomButton } from '~/common/scroll-to-bottom/ScrollToBottomButton';
 import { ShortcutKey, useGlobalShortcuts } from '~/common/components/shortcuts/useGlobalShortcuts';
 import { WorkspaceIdProvider } from '~/common/stores/workspace/WorkspaceIdProvider';
 import { addSnackbar, removeSnackbar } from '~/common/components/snackbar/useSnackbarsStore';
+import { themeMinWidthChatPane } from '~/common/app.theme';
 import { createDMessageFromFragments, createDMessagePlaceholderIncomplete, DMessageMetadata, duplicateDMessageMetadata } from '~/common/stores/chat/chat.message';
 import { createErrorContentFragment, createTextContentFragment, DMessageAttachmentFragment, DMessageContentFragment, duplicateDMessageFragments } from '~/common/stores/chat/chat.fragments';
 import { gcChatImageAssets } from '~/common/stores/chat/chat.gc';
@@ -49,7 +51,7 @@ import { Composer } from './components/composer/Composer';
 import { LiveSvgAnimator } from './components/live-svg/LiveSvgAnimator';
 import { PaneTitleOverlay } from './components/PaneTitleOverlay';
 import { useComposerAutoHide } from './components/composer/useComposerAutoHide';
-import { usePanesManager } from './components/panes/store-panes-manager';
+import { getOtherPanesConversationIds, usePanesManager } from './components/panes/store-panes-manager';
 
 import type { ChatExecuteMode } from './execute-mode/execute-mode.types';
 
@@ -87,7 +89,7 @@ const chatMessageListSx: SxProps = {
 const chatBeamWrapperSx: SxProps = {
   flexGrow: 1,
   // we added these after removing the minSize={20} (%) from the containing panel.
-  minWidth: '18rem',
+  minWidth: themeMinWidthChatPane,
   // minHeight: 'calc(100vh - 69px - var(--AGI-Nav-width))',
 };
 
@@ -346,7 +348,9 @@ export function AppChat() {
   const handleConversationNewInFocusedPane = React.useCallback((forceNoRecycle: boolean, isIncognito: boolean) => {
 
     // create conversation (or recycle the existing top-of-stack empty conversation)
-    const conversationId = (recycleNewConversationId && !forceNoRecycle && !isIncognito)
+    // never recycle a chat shown in another pane: both panes would end up on the same chat
+    const recycleShownElsewhere = !!recycleNewConversationId && getOtherPanesConversationIds().includes(recycleNewConversationId);
+    const conversationId = (recycleNewConversationId && !forceNoRecycle && !isIncognito && !recycleShownElsewhere)
       ? recycleNewConversationId
       : prependNewConversation(getConversationSystemPurposeId(focusedPaneConversationId) ?? undefined, isIncognito);
 
@@ -450,7 +454,9 @@ export function AppChat() {
     const nextConversationId = deleteConversations(conversationIds, /*focusedSystemPurposeId ??*/ undefined);
 
     // switch the focused pane to the new conversation - NOTE: this makes the assumption that deletion had impact on the focused pane
-    handleOpenConversationInFocusedPane(nextConversationId);
+    // unless another pane shows it (the panes store then re-targets to a distinct chat, or unsplits) - two panes must not share a chat
+    if (!getOtherPanesConversationIds().includes(nextConversationId))
+      handleOpenConversationInFocusedPane(nextConversationId);
 
     // run GC for dblobs in this conversation
     void gcChatImageAssets(); // fire/forget
@@ -705,7 +711,7 @@ export function AppChat() {
               sx={scrollToBottomSx}
             >
 
-              {!_paneBeamIsOpen && (
+              {!_paneBeamIsOpen && (<RenderDecayZone>
                 <ChatMessageList
                   conversationId={_paneConversationId}
                   conversationHandler={_paneChatHandler}
@@ -724,7 +730,7 @@ export function AppChat() {
                   onTextImagine={handleImagineFromText}
                   sx={chatMessageListSx}
                 />
-              )}
+              </RenderDecayZone>)}
 
               {_paneBeamIsOpen && (
                 <ChatBeamWrapper

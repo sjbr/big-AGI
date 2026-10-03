@@ -58,11 +58,12 @@ export type DMessageAttachmentFragment = _DMessageFragmentWrapper<'attachment',
 };
 
 /**
- * Void Fragments: no meaning, pure cosmetic, not stored, not processed
+ * Void Fragments: reasoning, annotations and UI placeholders outside ordinary content.
+ * Reasoning is stored and can be replayed to providers; transient placeholders are removed on completion.
  */
 export type DMessageVoidFragment = _DMessageFragmentWrapper<'void',
   | DVoidModelAnnotationsPart     // (non submitted) model references, citations, etc.
-  | DVoidModelAuxPart             // (non submitted) model auxiliary information, from the model itself
+  | DVoidModelAuxPart             // model reasoning and continuity data; replay depends on the provider
   | DVoidPlaceholderPart          // (non submitted) placeholder to be replaced by another part
   | _SentinelPart
 >;
@@ -98,27 +99,28 @@ type _DMessageFragmentWrapper<TFragment, TPart extends { pt: string }> = {
  * - Lossy-safe: Can be dropped during conversion/export without breaking functionality.
  * - Graceful-degrade on missing.
  */
-export type DMessageFragmentVendorState = Record<string, unknown> & {
+export type DMessageFragmentVendorState = Record<string, unknown> & DMessageFragmentVendorStateKnown;
+export type DMessageFragmentVendorStateKnown = {
+  // Future: anthropic?: { ... }
   gemini?: {
     thoughtSignature?: string; // Gemini 3+ - echoed back to maintain reasoning context
   };
-  openai?: {
-    // Responses API reasoning item continuity handle.
-    // IMPORTANT: OpenAI-private encryption + server-side item id; never round-trip to xAI.
-    reasoningItem?: { id?: string; encryptedContent?: string; };
-    // Responses API message phase (on text fragments): 'commentary' (preamble/progress) vs 'final_answer'.
-    // gpt-5.4+ set it on every assistant message; replayed on follow-up requests.
-    phase?: 'commentary' | 'final_answer';
-  };
-  xai?: {
-    // xAI Responses API reasoning item continuity handle.
-    // IMPORTANT: xAI-private encryption + server-side item id; never round-trip to OpenAI.
-    reasoningItem?: { id?: string; encryptedContent?: string; };
-    // message phase - captured via the shared Responses parser; not replayed to xAI yet
-    phase?: 'commentary' | 'final_answer';
-  };
-  // Future: anthropic?: { ... }
+  // Responses-API vendors (AixWire_Vendors.RSP_VENDORS in aix.wiretypes.ts): one namespace each, same shape. The handles are
+  // vendor-server-private (encryption keys + item ids): OpenAI's never go to xAI or Meta, and vice versa.
+  metaai?: _DMessageFragmentRspState;
+  openai?: _DMessageFragmentRspState;
+  sakanaai?: _DMessageFragmentRspState;
+  xai?: _DMessageFragmentRspState;
 }
+
+// Responses-API continuity state, one namespace per vendor (mirrors AixWire_Parts._vnd.<AixWire_Vendors.RspVendor>)
+type _DMessageFragmentRspState = {
+  // reasoning item continuity handle (rs_... id + encrypted_content), replayed on follow-up requests to the SAME vendor
+  reasoningItem?: { id?: string; encryptedContent?: string; };
+  // message phase on text fragments: 'commentary' (preamble/progress) vs 'final_answer'; replayed on follow-up requests
+  phase?: 'commentary' | 'final_answer';
+};
+
 
 
 /// Parts - STABLE ///
@@ -311,10 +313,14 @@ export type DVoidModelAuxPart = {
 export type DVoidPlaceholderPart = {
   pt: 'ph',
   pText: string,
+  pDetail?: string,        // extra detail for the render (e.g. tooltip)
 
   // render type
   pType?:
-    | 'chat-gen-follow-up',  // a follow-up is being generated
+    | 'chat-gen-follow-up'   // a follow-up is being generated
+    | 'notice',              // neutral dismissible notice (e.g. earlier reasoning dropped): survives generation, deleted by the user
+  pNoticeKind?: 'input-transform' | 'hres-discarded' | 'flow-cont', // for 'notice': the AIX notice type it came from, for per-kind UI policy (e.g. input-transform yields to errors, flow-cont renders as a divider)
+  pNoticeLevel?: 'warn', // for 'notice': the sender judged it unexpected (e.g. a reasoning reset inside a paused turn); absent = informational
 
   // operation history for stacked progress UI
   opLog?: readonly DVoidPlaceholderMOp[],
@@ -582,8 +588,8 @@ export function createModelAuxVoidFragment(aType: DVoidModelAuxPart['aType'], aT
   return _createVoidFragment(_create_ModelAux_Part(aType, aText, textSignature, redactedData));
 }
 
-export function createPlaceholderVoidFragment(placeholderText: string, placeholderType?: DVoidPlaceholderPart['pType'], aixControl?: DVoidPlaceholderPart['aixControl'], opLog?: readonly DVoidPlaceholderMOp[]): DMessageVoidFragment {
-  return _createVoidFragment(_create_Placeholder_Part(placeholderText, placeholderType, aixControl, opLog));
+export function createPlaceholderVoidFragment(placeholderText: string, placeholderType?: DVoidPlaceholderPart['pType'], aixControl?: DVoidPlaceholderPart['aixControl'], opLog?: readonly DVoidPlaceholderMOp[], pDetail?: string, pNoticeKind?: DVoidPlaceholderPart['pNoticeKind'], pNoticeLevel?: DVoidPlaceholderPart['pNoticeLevel']): DMessageVoidFragment {
+  return _createVoidFragment(_create_Placeholder_Part(placeholderText, placeholderType, aixControl, opLog, pDetail, pNoticeKind, pNoticeLevel));
 }
 
 function _createVoidFragment(part: DMessageVoidFragment['part']): DMessageVoidFragment {
@@ -714,8 +720,8 @@ function _create_ModelAux_Part(aType: DVoidModelAuxPart['aType'], aText: string,
   };
 }
 
-function _create_Placeholder_Part(placeholderText: string, pType?: DVoidPlaceholderPart['pType'], aixControl?: DVoidPlaceholderPart['aixControl'], opLog?: readonly DVoidPlaceholderMOp[]): DVoidPlaceholderPart {
-  return { pt: 'ph', pText: placeholderText, ...(pType ? { pType } : undefined), ...(opLog ? { opLog: opLog.map(e => ({ ...e })) } : undefined), ...(aixControl ? { aixControl: { ...aixControl } } : undefined) };
+function _create_Placeholder_Part(placeholderText: string, pType?: DVoidPlaceholderPart['pType'], aixControl?: DVoidPlaceholderPart['aixControl'], opLog?: readonly DVoidPlaceholderMOp[], pDetail?: string, pNoticeKind?: DVoidPlaceholderPart['pNoticeKind'], pNoticeLevel?: DVoidPlaceholderPart['pNoticeLevel']): DVoidPlaceholderPart {
+  return { pt: 'ph', pText: placeholderText, ...(pDetail ? { pDetail } : undefined), ...(pType ? { pType } : undefined), ...(pNoticeKind ? { pNoticeKind } : undefined), ...(pNoticeLevel ? { pNoticeLevel } : undefined), ...(opLog ? { opLog: opLog.map(e => ({ ...e })) } : undefined), ...(aixControl ? { aixControl: { ...aixControl } } : undefined) };
 }
 
 function _create_Sentinel_Part(): _SentinelPart {
@@ -770,7 +776,7 @@ function _duplicate_Part<TPart extends (DMessageContentFragment | DMessageAttach
       return _create_ModelAux_Part(part.aType, part.aText, part.textSignature, part.redactedData) as TPart;
 
     case 'ph':
-      return _create_Placeholder_Part(part.pText, part.pType, part.aixControl, part.opLog) as TPart;
+      return _create_Placeholder_Part(part.pText, part.pType, part.aixControl, part.opLog, part.pDetail, part.pNoticeKind, part.pNoticeLevel) as TPart;
 
     case 'text':
       return _create_Text_Part(part.text) as TPart;

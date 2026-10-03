@@ -15,17 +15,23 @@
 // - Anthropic coverage is complete: every served 'anthropic.*' id resolves through llmBedrockFindAnthropicModel
 //   (fable-5, opus-5/4-8/4-7/4-6, sonnet-5/4-6, opus-4-5, sonnet-4-5, haiku-4-5, opus-4-1, sonnet-4, haiku-3).
 //   The one exception is claude-3-sonnet-20240229 (0-day path, hidden). Mythos 5 is not offered on Bedrock.
+//   [2026-09-01] +fable-5-1 (foundation model + us./global. profiles, ACTIVE; invoke 403 on this account). Mythos 5.1 not offered.
 // - Mantle also lists 6 undated 'anthropic.*' aliases, but they answer NEITHER OpenAI route ("does not support
 //   the '/v1/chat/completions' API", same for '/v1/responses') - Anthropic on Bedrock is invoke-only.
 // - Mantle accepts OpenAI tools on every id probed except writer.palmyra-vision-7b (see SKIP_MANTLE_TOOLS_IDS):
 //   zai.glm-4.7, openai.gpt-oss-120b, qwen.qwen3-coder-next and mistral.mistral-large-3-675b-instruct all
 //   returned finish_reason 'tool_calls'.
 // - Listed but not callable: google.gemma-4-{31b,26b-a4b,e2b} and xai.grok-4.3 400 on both Mantle routes
-//   ("isn't supported on this route"). openai.gpt-5.4/5.5 (+ dated ids) and the gpt-5.6-{sol,terra,luna}
-//   profiles are account-gated (401 access_denied, "contact AWS Sales"; re-checked 2026-08-25) - curated
+//   ("isn't supported on this route"). openai.gpt-5.4/5.5 (+ dated ids), gpt-5.6-{sol,terra,luna} and gpt-6-{astra,sol,luna}
+//   are account-gated (401 access_denied, "contact AWS Sales"; re-checked 2026-09-22) - curated
 //   anyway via #1167 (author live-verified on an access-enabled account): the 401 is self-explanatory for
 //   accounts without the enablement.
-// - Model list: https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html
+// - Docs-only findings awaiting a live re-check (no AWS creds here): AWS documents an Anthropic-native 'Messages' API on
+//   bedrock-mantle for the Claude 5 / Opus 4.7-4.8 / Haiku 4.5 family (not wired here); qwen.qwen3-235b-a22b-2507 now has a
+//   bedrock-runtime '-v1:0' id, so it (and maybe other KNOWN_MANTLE_ONLY qwen3/deepseek/kimi ids) may be FM-promoted like
+//   qwen3-coder-next was; the gpt-oss cards say 16K max output vs the live-probed out:128000 kept below; GLM 4.6 is off
+//   the Z.AI model-cards page (Legacy vs removed unclear).
+// - Model list: https://docs.aws.amazon.com/bedrock/latest/userguide/model-cards.html (models-supported.html is now a stub)
 
 import * as z from 'zod/v4';
 
@@ -48,16 +54,22 @@ const SKIP_MANTLE_TOOLS_IDS = ['writer.palmyra-vision-7b']; // 400s: '"auto" too
 // except the gpt-oss output cap, which is Bedrock's own (converse.maxTokensMaximum on openai.gpt-oss-*-1:0).
 // `api: 'responses'`: model only implements the OpenAI Responses API (on the '/openai/v1/responses' path) and rejects
 // Chat Completions with a 400 - see https://docs.aws.amazon.com/bedrock/latest/userguide/models-api-compatibility.html
-// GPT-5.x sizes follow the AWS model cards (272K ctx); the OpenAI vendor lists this family at 1M - Bedrock's real
-// cap is not probeable while account-gated, so the cards stand.
+// GPT-5.x ctx is 1M per the AWS model cards (272K is only the short/long pricing-tier boundary); out stays 128000 (cards say
+// "N/A"); GPT-6 1,050,000 / 128,000 per the Astra card. deepseek.v3.1 out 8192 and kimi-k2-thinking out 16384 per their cards' "Max output tokens".
+// Entries with `api: 'responses'` win over the foundation-model listing: AWS also lists GPT-5.6 and GPT-6 as foundation models
+// (2026-09), which described them as 131K Chat Completions models without reasoning. Their us./global. profiles keep the fused
+// path: per the AWS card Mantle serves no geo/global ids, so those likely need bedrock-runtime (not wired, unverified here).
 const KNOWN_MANTLE_ONLY: Record<string, { label: string; ctx: number; out: number; vision?: true; reasoning?: true; api?: 'responses' }> = {
-  'deepseek.v3.1': { label: 'DeepSeek V3.1', ctx: 131072, out: 16384 },
-  'moonshotai.kimi-k2-thinking': { label: 'Kimi K2 Thinking', ctx: 262144, out: 65536, reasoning: true },
-  'openai.gpt-5.4': { label: 'GPT-5.4', ctx: 272000, out: 128000, vision: true, reasoning: true, api: 'responses' },
-  'openai.gpt-5.5': { label: 'GPT-5.5', ctx: 272000, out: 128000, vision: true, reasoning: true, api: 'responses' },
-  'openai.gpt-5.6-luna': { label: 'GPT-5.6 Luna', ctx: 272000, out: 128000, vision: true, reasoning: true, api: 'responses' },
-  'openai.gpt-5.6-sol': { label: 'GPT-5.6 Sol', ctx: 272000, out: 128000, vision: true, reasoning: true, api: 'responses' },
-  'openai.gpt-5.6-terra': { label: 'GPT-5.6 Terra', ctx: 272000, out: 128000, vision: true, reasoning: true, api: 'responses' },
+  'deepseek.v3.1': { label: 'DeepSeek V3.1', ctx: 131072, out: 8192 },
+  'moonshotai.kimi-k2-thinking': { label: 'Kimi K2 Thinking', ctx: 262144, out: 16384, reasoning: true },
+  'openai.gpt-5.4': { label: 'GPT-5.4', ctx: 1000000, out: 128000, vision: true, reasoning: true, api: 'responses' },
+  'openai.gpt-5.5': { label: 'GPT-5.5', ctx: 1000000, out: 128000, vision: true, reasoning: true, api: 'responses' },
+  'openai.gpt-5.6-luna': { label: 'GPT-5.6 Luna', ctx: 1000000, out: 128000, vision: true, reasoning: true, api: 'responses' },
+  'openai.gpt-5.6-sol': { label: 'GPT-5.6 Sol', ctx: 1000000, out: 128000, vision: true, reasoning: true, api: 'responses' },
+  'openai.gpt-5.6-terra': { label: 'GPT-5.6 Terra', ctx: 1000000, out: 128000, vision: true, reasoning: true, api: 'responses' },
+  'openai.gpt-6-astra': { label: 'GPT-6 Astra', ctx: 1050000, out: 128000, vision: true, reasoning: true, api: 'responses' },
+  'openai.gpt-6-luna': { label: 'GPT-6 Luna', ctx: 1050000, out: 128000, vision: true, reasoning: true, api: 'responses' },
+  'openai.gpt-6-sol': { label: 'GPT-6 Sol', ctx: 1050000, out: 128000, vision: true, reasoning: true, api: 'responses' },
   'openai.gpt-oss-20b': { label: 'GPT-OSS 20B', ctx: 131072, out: 128000 },
   'openai.gpt-oss-120b': { label: 'GPT-OSS 120B', ctx: 131072, out: 128000 },
   'qwen.qwen3-32b': { label: 'Qwen3 32B', ctx: 131072, out: 16384 },
@@ -261,8 +273,8 @@ export function bedrockModelsToDescriptions(
       outputImage: fm.outputModalities?.includes('IMAGE') ?? false,
     });
 
-    // mark as used in mantle
-    if (hasMantle)
+    // mark as used in mantle - except curated Responses models, described by the Mantle-only pass below
+    if (hasMantle && !_isKnownMantleResponses(baseId))
       remainingMantleModelIds.delete(baseId);
   }
 
@@ -298,8 +310,8 @@ export function bedrockModelsToDescriptions(
       outputImage: foundationMeta?.outputImage ?? false,
     });
 
-    // mark as used in mantle
-    if (hasMantle)
+    // mark as used in mantle (same curated exception as above)
+    if (hasMantle && !_isKnownMantleResponses(baseId))
       remainingMantleModelIds.delete(baseId);
   }
 
@@ -348,6 +360,9 @@ export function bedrockModelsToDescriptions(
       }
 
     } else {
+
+      // curated Responses models served by Mantle: described by the Mantle-only pass below (profiles stay here)
+      if (!modelMeta.isProfile && modelMeta.hasMantle && _isKnownMantleResponses(modelId)) continue;
 
       // Non-Anthropic models - may call them via mantle (if hasMantle) or converse (if not legacy)
       const isMantle = modelMeta.hasMantle;
@@ -417,6 +432,10 @@ function _findKnownMantleModel(mantleId: string): typeof KNOWN_MANTLE_ONLY[strin
   return KNOWN_MANTLE_ONLY[mantleId] ?? KNOWN_MANTLE_ONLY[mantleId.replace(/-\d{4}-\d{2}-\d{2}$/, '')];
 }
 
+function _isKnownMantleResponses(modelId: string): boolean {
+  return _findKnownMantleModel(modelId)?.api === 'responses';
+}
+
 // Extract provider name from Mantle model ID (e.g., 'mistral.model-name' -> 'Mistral')
 function _extractMantleProvider(modelId: string): string {
   const parts = modelId.split('.');
@@ -469,6 +488,8 @@ function _bedrockModelSort(a: ModelDescriptionSchema, b: ModelDescriptionSchema)
 
   // --- Anthropic: family > class > variant > region ---
   const familyPrecedence: string[][] = [
+    ['-fable-5-5', '-mythos-5-5', '-opus-5-5', '-sonnet-5-5', '-haiku-5-5'], // Claude 5.5 gen
+    ['-fable-5-1', '-mythos-5-1', '-opus-5-1', '-sonnet-5-1', '-haiku-5-1'], // Claude 5.1 gen
     ['-fable-5', '-mythos-5', '-opus-5', '-sonnet-5', '-haiku-5'], // Claude 5 gen
     ['-4-8'], ['-4-7'], ['-4-6'], ['-4-5-'], ['-4-1-'], ['-4-'], ['-3-7-'], ['-3-5-'], ['-3-'],
   ];

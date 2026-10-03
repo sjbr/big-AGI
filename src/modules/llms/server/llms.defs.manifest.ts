@@ -51,6 +51,7 @@ export const LLMS_DEFS_MANIFEST = {
   groq: { files: ['openai/models/groq.models.ts', 'openai/wiretypes/groq.wiretypes.ts'] },
   lmstudio: { files: ['openai/models/lmstudio.models.ts'] },
   localai: { files: ['openai/models/localai.models.ts'] },
+  metaai: { files: ['openai/models/metaai.models.ts'] },
   mistral: { files: ['openai/models/mistral.models.ts'] },
   modular: { files: ['openai/models/modular.models.ts'] },
   moonshot: { files: ['openai/models/moonshot.models.ts'] },
@@ -65,6 +66,7 @@ export const LLMS_DEFS_MANIFEST = {
       'openai/wiretypes/openrouter.wiretypes.ts',
       'anthropic/anthropic.models.ts',
       'gemini/gemini.models.ts',
+      'openai/models/metaai.models.ts',
       'openai/models/moonshot.models.ts',
       'openai/models/openai.models.ts',
       'openai/models/sakanaai.models.ts',
@@ -98,12 +100,10 @@ export const LLMS_DEFS_EXTRA_BUCKETS = {
 
   // OpenAI-lookalike gateways, selected by host heuristics under the 'openai' dialect.
   // Custom-host OpenAI services (non api.openai.com) compare against this bucket.
-  // tlusapi is structure-detected across all OpenAI-compatible dialects but only ever
-  // triggers on custom gateways, so it lives here.
   // openai.models.ts is claimed too: proxies to OpenAI (LiteLLM, gateways) sit behind a
   // custom host but are parsed by the first-party parser, so its edits must reach them.
   // openrouter.models.ts is claimed for the Nous Research mapper reuse; its other
-  // first-party lookup imports (anthropic/gemini/moonshot/sakanaai/xai/zai) are deliberately
+  // first-party lookup imports (anthropic/gemini/metaai/moonshot/sakanaai/xai/zai) are deliberately
   // untracked here (owner decision: lookalike hosts do not roll on those - bump `epoch` for a roll).
   _openaiCompat: {
     files: [
@@ -119,7 +119,6 @@ export const LLMS_DEFS_EXTRA_BUCKETS = {
       'openai/models/nvidianim.models.ts',
       'openai/models/openai.models.ts',
       'openai/models/openrouter.models.ts',
-      'openai/models/tlusapi.models.ts',
       'openai/wiretypes/baseten.wiretypes.ts',
       'openai/wiretypes/fireworksai.wiretypes.ts',
       'openai/wiretypes/llmapi.wiretypes.ts',
@@ -129,6 +128,7 @@ export const LLMS_DEFS_EXTRA_BUCKETS = {
     ignoreImports: [
       'anthropic/anthropic.models.ts',
       'gemini/gemini.models.ts',
+      'openai/models/metaai.models.ts',
       'openai/models/moonshot.models.ts',
       'openai/models/sakanaai.models.ts',
       'openai/models/xai.models.ts',
