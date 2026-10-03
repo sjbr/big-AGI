@@ -8,7 +8,7 @@ import { createDebugWireLogger } from '~/server/wire';
 import { fetchJsonOrTRPCThrow } from '~/server/trpc/trpc.router.fetchers';
 
 import type { ModelDescriptionSchema } from './llm.server.types';
-import { llmDevValidateParameterSpecs_DEV, llmsAutoImplyInterfaces } from './models.mappings';
+import { llmDevValidateParameterSpecs_DEV, llmsAutoImplyInterfaces, llmsWireCompatCacheTag } from './models.mappings';
 
 
 // protocol: Anthropic
@@ -51,6 +51,7 @@ import { novitaHeuristic, novitaModelsToModelDescriptions } from './openai/model
 import { nvidiaNIMHeuristic, nvidiaNIMModelsToModelDescriptions } from './openai/models/nvidianim.models';
 import { lmStudioFetchModels, lmStudioModelsToModelDescriptions } from './openai/models/lmstudio.models';
 import { localAIModelSortFn, localAIModelToModelDescription } from './openai/models/localai.models';
+import { metaAIModelsToModelDescriptions } from './openai/models/metaai.models';
 import { mistralModels } from './openai/models/mistral.models';
 import { modularModelsToModelDescriptions } from './openai/models/modular.models';
 import { moonshotModelFilter, moonshotModelSortFn, moonshotModelToModelDescription } from './openai/models/moonshot.models';
@@ -58,7 +59,6 @@ import { openRouterInjectVariants, openRouterModelFamilySortFn, openRouterModelT
 import { openAIInjectVariants, openAIModelFilter, openAIModelToModelDescription, openAISortModels, openaiValidateModelDefs_DEV } from './openai/models/openai.models';
 import { sakanaAIModelsToModelDescriptions } from './openai/models/sakanaai.models';
 import { perplexityHardcodedModelDescriptions, perplexityInjectVariants } from './openai/models/perplexity.models';
-import { tlusApiHeuristic, tlusApiTryParse } from './openai/models/tlusapi.models';
 import { togetherAIModelsToModelDescriptions } from './openai/models/together.models';
 import { xaiFetchModelDescriptions, xaiModelSort } from './openai/models/xai.models';
 import { zaiCuratedModelDescriptions, zaiDiscoverModels, zaiModelSort } from './openai/models/zai.models';
@@ -86,7 +86,8 @@ export async function listModelsRunDispatch(access: AixAPI_Access, signal?: Abor
   const dispatch = _listModelsCreateDispatch(access, signal);
   const wireModels = await dispatch.fetchModels();
   const models = dispatch.convertToDescriptions(wireModels)
-    .map(llmsAutoImplyInterfaces); // auto-inject implied IFs from parameterSpecs
+    .map(llmsAutoImplyInterfaces) // auto-inject implied IFs from parameterSpecs
+    .map(llmsWireCompatCacheTag); // legacy cache tag for older clients - TODO: delete after 2026-12-03
 
   // DEV: validate parameterSpecs (enumValues ⊆ registry values, paramId existence)
   if (process.env.NODE_ENV === 'development')
@@ -388,6 +389,7 @@ function _listModelsCreateDispatch(access: AixAPI_Access, signal?: AbortSignal):
     case 'deepseek':
     case 'groq':
     case 'localai':
+    case 'metaai':
     case 'mistral':
     case 'modular':
     case 'moonshot':
@@ -426,13 +428,6 @@ function _listModelsCreateDispatch(access: AixAPI_Access, signal?: AbortSignal):
           // [Together] missing the .data property - so we have to do this early
           if (dialect === 'togetherai')
             return togetherAIModelsToModelDescriptions(openAIWireModelsResponse);
-
-          // [TLUS-style API] detect by structure: { data: [{ id, tier, capabilities, ... }] }
-          if (tlusApiHeuristic(openAIWireModelsResponse)) {
-            const tlusModels = tlusApiTryParse(openAIWireModelsResponse);
-            if (tlusModels) return tlusModels;
-            // fall through if failed
-          }
 
           // NOTE: we don't zod here as it would strip unknown properties needed for some dialects - so we proceed optimistically
           // let maybeModels = OpenAIWire_API_Models_List.Response_schema.parse(openAIWireModelsResponse).data || [];
@@ -473,7 +468,7 @@ function _listModelsCreateDispatch(access: AixAPI_Access, signal?: AbortSignal):
               return maybeModels
                 .filter(({ id }) => deepseekModelFilter(id))
                 .map(({ id }) => deepseekModelToModelDescription(id))
-                // .reduce(deepseekInjectVariants, [] as ModelDescriptionSchema[]) // was used to inject V3.2-Speciale
+                // an inject step lived here twice (V3.2-Speciale, the V4.1-Flash beta) for ids /models never listed
                 .sort(deepseekModelSort);
 
             case 'groq':
@@ -488,6 +483,11 @@ function _listModelsCreateDispatch(access: AixAPI_Access, signal?: AbortSignal):
               return maybeModels
                 .map(({ id }) => localAIModelToModelDescription(id))
                 .sort(localAIModelSortFn);
+
+            case 'metaai':
+              // [Meta AI] ids-only list (created is a constant 0, no type field): caps/pricing/params from the curated
+              // table; the transcription id is filtered out by name, the image model is curated and kept
+              return metaAIModelsToModelDescriptions(maybeModels);
 
             case 'mistral':
               return mistralModels(maybeModels);

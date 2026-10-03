@@ -1,5 +1,5 @@
 import { ANTHROPIC_API_PATHS, anthropicAccess, anthropicBetaFeatures } from '~/modules/llms/server/anthropic/anthropic.access';
-import { OPENAI_API_PATHS, openAIAccess } from '~/modules/llms/server/openai/openai.access';
+import { OPENAI_API_PATHS, openAIAccess, OpenAIDialects } from '~/modules/llms/server/openai/openai.access';
 import { bedrockAccessAsync, bedrockResolveRegion, bedrockURLMantle, bedrockURLRuntime } from '~/modules/llms/server/bedrock/bedrock.access';
 import { geminiAccess } from '~/modules/llms/server/gemini/gemini.access';
 import { ollamaAccess } from '~/modules/llms/server/ollama/ollama.access';
@@ -17,7 +17,7 @@ import { aixToBedrockConverse } from './adapters/bedrock.converse';
 import { aixToGeminiGenerateContent } from './adapters/gemini.generateContent';
 import { aixToGeminiInteractionsCreate } from './adapters/gemini.interactionsCreate';
 import { aixToOpenAIChatCompletions } from './adapters/openai.chatCompletions';
-import { aixToOpenAIResponses } from './adapters/openai.responsesCreate';
+import { aixToOpenAIResponses, openAIDialectToRspVendor } from './adapters/openai.responsesCreate';
 import { aixToXAIResponses } from './adapters/xai.responsesCreate';
 
 import type { IParticleTransmitter } from './parsers/IParticleTransmitter';
@@ -32,6 +32,14 @@ import { createOpenAIResponseParserNS, createOpenAIResponsesEventParser } from '
 
 
 // -- Dispatch types --
+
+/** OpenAI-compatible dialects that serve ONLY the Responses API (every model), regardless of the per-model vndOaiResponsesAPI flag */
+const RESPONSES_ONLY_DIALECTS: ReadonlySet<OpenAIDialects> = new Set<OpenAIDialects>([
+  'metaai', // Meta Muse models: Responses is the only Meta surface carrying reasoning across turns
+  'sakanaai', // Sakana Fugu models: tools, multimodal, reasoning
+  'xai', // all xAI models (own adapter)
+]);
+
 
 export type ChatGenerateDispatch = {
   request: ChatGenerateDispatchRequest;
@@ -49,7 +57,8 @@ export type ChatGenerateDispatchRequest =
   | { url: string, headers: HeadersInit, method: 'GET' };
 
 export type ChatGenerateParseContext = {
-  retriesAvailable: boolean;
+  // whether the operation retrier has attempts left for an error of this HTTP(-equivalent) class - parsers throw OperationRetrySignal only if true
+  hasRetriesForHttpStatus: (httpStatus?: number) => boolean;
 };
 
 export type ChatGenerateParseFunction = (partTransmitter: IParticleTransmitter, eventData: string, eventName?: string, context?: ChatGenerateParseContext) => void;
@@ -96,7 +105,7 @@ export async function createChatGenerateDispatch(access: AixAPI_Access, model: A
         chatGenerateParse: streaming ? createAnthropicMessageParser() : createAnthropicMessageParserNS(),
         particleTransform: !model.vndAntTransformInlineFiles ? undefined : createAnthropicFileInlineTransform(
           anthropicAccess(access, ANTHROPIC_API_PATHS.files, hostedFeatures),
-          model.vndAntTransformInlineFiles === 'inline-file-and-delete',
+          model.vndAntTransformInlineFiles,
         ),
       };
     }
@@ -125,7 +134,7 @@ export async function createChatGenerateDispatch(access: AixAPI_Access, model: A
           const invokeUrl = bedrockURLRuntime(bedrockResolveRegion(access), model.id, 'invoke', streaming);
 
           // body
-          const bedrockHostedFeatures = aixAnthropicHostedFeatures(model, chatGenerate);
+          const bedrockHostedFeatures = aixAnthropicHostedFeatures(model, chatGenerate, 'bedrock');
           // NOTE: the 'bedrock' target already removed the fields Bedrock's schema rejects (effort, speed).
           // What's left below is envelope translation only: the Anthropic schema requires these, Bedrock
           // carries the same information in the URL/body instead - so they cannot be dropped adapter-side.
@@ -265,6 +274,7 @@ export async function createChatGenerateDispatch(access: AixAPI_Access, model: A
     case 'groq':
     case 'lmstudio':
     case 'localai':
+    case 'metaai':
     case 'mistral':
     case 'modular':
     case 'moonshot':
@@ -277,11 +287,11 @@ export async function createChatGenerateDispatch(access: AixAPI_Access, model: A
     case 'xai':
     case 'zai':
 
-      // newer: OpenAI Responses API, for models that support it and all XAI/Sakana models
-      const isSakanaModel = dialect === 'sakanaai'; // All Sakana Fugu models use the Responses API (tools, multimodal, reasoning)
-      const isXAIModel = dialect === 'xai'; // All XAI models are accessed via Responses now
-      const isResponsesAPI = !!model.vndOaiResponsesAPI || isSakanaModel || isXAIModel;
+      // newer: OpenAI Responses API - per model (vndOaiResponsesAPI) or for the dialects served on Responses only
+      const isResponsesAPI = !!model.vndOaiResponsesAPI || RESPONSES_ONLY_DIALECTS.has(dialect);
       if (isResponsesAPI) {
+        // parser namespace for the reasoning continuity blobs (vendor-private keys + server-side ids), see the note below
+        const responsesVendor = openAIDialectToRspVendor(dialect);
         return {
           request: {
             ...openAIAccess(access, model.id, OPENAI_API_PATHS.responses),
@@ -296,7 +306,7 @@ export async function createChatGenerateDispatch(access: AixAPI_Access, model: A
              *
              * Note: Response format is compatible with OpenAI parser.
              */
-            body: isXAIModel
+            body: dialect === 'xai' // xAI has its own Responses adapter
               ? aixToXAIResponses(model, chatGenerate, streaming, enableResumability)
               : aixToOpenAIResponses(dialect, model, chatGenerate, streaming, enableResumability),
           },
@@ -305,8 +315,8 @@ export async function createChatGenerateDispatch(access: AixAPI_Access, model: A
           // (encrypted_content + rs_... id) land in the matching _vnd namespace and never leak
           // across providers (different keys + different server-side state).
           chatGenerateParse: streaming
-            ? createOpenAIResponsesEventParser(isXAIModel ? 'xai' : 'openai')
-            : createOpenAIResponseParserNS(isXAIModel ? 'xai' : 'openai'),
+            ? createOpenAIResponsesEventParser(responsesVendor)
+            : createOpenAIResponseParserNS(responsesVendor),
         };
       }
 
@@ -387,6 +397,7 @@ export async function createChatGenerateResumeDispatch(access: AixAPI_Access, re
     case 'groq':
     case 'lmstudio':
     case 'localai':
+    case 'metaai':
     case 'mistral':
     case 'modular':
     case 'moonshot':

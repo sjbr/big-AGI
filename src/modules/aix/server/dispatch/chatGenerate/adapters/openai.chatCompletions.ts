@@ -13,7 +13,7 @@ import { AIX_MISSING_TOOL_RESULT_TEXT, aixSpillShallFlush, aixSpillSystemToUser,
 //
 // - only supports N=1, mainly because the whole ecosystem downstream only supports N=1
 // - not implemented: top_p, parallel_tool_calls, seed (deprecated), stop, user (deprecated -> safety_identifier, prompt_cache_key)
-// - fully ignored at the moment: frequency_penalty, presence_penalty, logit_bias, logprobs, top_logprobs, service_tier
+// - fully ignored at the moment: frequency_penalty, presence_penalty, logit_bias, logprobs, top_logprobs
 // - impedence mismatch: see the notes in the message conversion function for additional decisions, including:
 //   - doc parts embedded as markdown text
 //   - image parts embedded as base64 data URLs
@@ -52,7 +52,7 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
   // [OpenAI] max_tokens is now fully deprecated in favor of max_completion_tokens for all OpenAI models
   const hotFixUseMaxCompletionTokens = openAIDialect === 'openai' || openAIDialect === 'azure';
 
-  // [OpenAI] - o-family and reasoning models: don't support temperature/top_p, use developer role instead of system
+  // [OpenAI] - o-family and reasoning models: strip temperature/top_p (5.2+ take them only at effort 'none'), use developer role instead of system
   const hotFixOpenAIOFamily = (openAIDialect === 'openai' || openAIDialect === 'azure')
     && ['gpt-6', 'gpt-5', 'o4', 'o3', 'o1'].some(_id => model.id === _id || model.id.startsWith(_id + '-') || model.id.startsWith(_id + '.'));
 
@@ -80,6 +80,17 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
   // cache prefixes, so earlier ones are redundant with later ones.
   if (openAIDialect === 'openrouter')
     _capTrailingCacheBreakpoints(chatMessages, 4);
+
+  // [OpenRouter -> Anthropic, 2026-09-01] Fable/Mythos 5.x reject forced tool use upstream: _toOpenAIToolChoice degrades
+  // 'required' to 'auto', and this steering hint keeps the call rate at forced level (mirrors the native adapter's downgrade)
+  if (openAIDialect === 'openrouter' && chatGenerate.toolsPolicy?.type === 'any' && chatGenerate.tools?.length && _isOrtForcedToolRejectingAnt(model.id)) {
+    const mustUseHint = 'IMPORTANT: You MUST respond by calling one of the provided tools. Do not respond with text.';
+    const firstMessage = chatMessages[0];
+    if (firstMessage?.role === 'system' && typeof firstMessage.content === 'string')
+      firstMessage.content += '\n\n' + mustUseHint;
+    else
+      chatMessages.unshift({ role: 'system', content: mustUseHint });
+  }
 
   // [DeepSeek, 2026-04-24] When tools are present and thinking isn't disabled, V4 demands reasoning_content on EVERY assistant message in history
   // Inject '' placeholder where missing; real reasoning is attached by _toOpenAIMessages
@@ -162,6 +173,14 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
   if (model.vndOaiReasoningMode && openAIDialect !== 'openrouter')
     throw new Error('OpenAI Chat Completions API does not support the Reasoning Mode parameter (Responses API only)');
 
+  // [2026-09-03, OpenAI] processing tier (native and OpenRouter - other compatible hosts do not know it)
+  if (model.vndOaiServiceTier && (openAIDialect === 'openai' || openAIDialect === 'openrouter')) {
+    // [2026-09-29] 'ultrafast' is Responses-only: native Chat Completions 400s, OpenRouter silently serves it as 'priority' (2x)
+    if (model.vndOaiServiceTier === 'ultrafast')
+      throw new Error('OpenAI Chat Completions API does not support the Ultrafast service tier (Responses API only)');
+    payload.service_tier = model.vndOaiServiceTier;
+  }
+
   // [OpenAI] Vendor-specific reasoning effort
   const reasoningEffort = model.reasoningEffort; // ?? model.vndOaiReasoningEffort;
   if (reasoningEffort
@@ -171,7 +190,9 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
     && openAIDialect !== 'nvidianim' // NVIDIA rejects unknown params and gpt-oss strictly validates reasoning_effort - dedicated block below
     && openAIDialect !== 'perplexity' // Perplexity has its own block below with stricter validation
   ) {
-    // for: 'azure' | 'cerebras' | 'cohere' | 'groq' | 'lmstudio' | 'localai' | 'mistral' | 'modular' | 'openai' | 'sakanaai' | 'togetherai' | 'xai'
+    // for: 'azure' | 'cerebras' | 'cohere' | 'groq' | 'lmstudio' | 'localai' | 'metaai' | 'mistral' | 'modular' | 'openai' | 'sakanaai' | 'togetherai' | 'xai'
+    // [2026-09-22, OpenAI] GPT-6 here: 'max' 400s, and function tools 400 unless effort is 'none' (Sol, Luna) or always (Astra);
+    // the native defs route GPT-6 over Responses, so only compatible hosts land on this path
     payload.reasoning_effort = reasoningEffort;
   }
 
@@ -179,8 +200,8 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
   // [Z.ai] GLM thinking mode: 'none' -> disabled, else enabled - https://docs.z.ai/guides/capabilities/thinking-mode. reasoning_effort rides
   //   along: honored on GLM-5.2 (none|high|max) and GLM-5.3 (low|high|max, thinking compulsory - 'disabled' 400s), accepted-and-ignored on
   //   older GLM (live-probed 2026-08-17). Per-model levels are the catalog enumValues, not re-validated here.
-  // [DeepSeek, 2026-04-23] V4 thinking control https://api-docs.deepseek.com/guides/thinking_mode; 'low' keeps reasoning on but skips
-  //   the hidden agentic preamble - the cheap tier
+  // [DeepSeek, 2026-04-23] V4 thinking control https://api-docs.deepseek.com/guides/thinking_mode; low/high/max scale the trace
+  //   (on V4 'low' also skipped a hidden agentic preamble; gone on V4.1-Flash, probed 2026-09-12)
   if (reasoningEffort && (openAIDialect === 'deepseek' || openAIDialect === 'moonshot' || openAIDialect === 'zai')) {
     payload.thinking = { type: reasoningEffort !== 'none' ? 'enabled' : 'disabled' };
     if (reasoningEffort !== 'none') // effort takes effect only when thinking is enabled
@@ -259,14 +280,46 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
     _fixVndOaiRestoreMarkdown_Inline(payload);
 
 
-  // [OpenRouter] Vendor-specific web search (native or Exa)
-  if (openAIDialect === 'openrouter' && model.vndOrtWebSearch === 'auto')
-    payload.plugins = [...(payload.plugins || []), {
-      id: 'web',
-      // engine is optional - when undefined, OpenRouter uses native for supported models, falls back to Exa
-      // max_results: 5, // could be configurable in the future
-      // search_prompt: undefined, // could be configurable in the future
-    }];
+  // [OpenRouter, 2026-09-08] Web search and fetch as OpenRouter server tools, or the legacy 'web' plugin where the
+  // client asked for it (endpoints without tool support). Wire facts: aix.wiretypes.openrouter.ts
+  if (openAIDialect === 'openrouter') {
+    const ortSearch = model.vndOrtWebSearch;
+    if (ortSearch?.via === 'plugin')
+      payload.plugins = [...(payload.plugins || []), { id: 'web' }];
+    else if (!skipWebSearchDueToCustomTools) {
+      const ortTools: NonNullable<TRequest['tools']> = [];
+
+      if (ortSearch)
+        ortTools.push({
+          type: 'openrouter:web_search',
+          parameters: {
+            engine: ortSearch.engine,
+            mode: ortSearch.mode,
+            max_results: ortSearch.maxResults,
+            max_uses: ortSearch.maxUses,
+            max_total_results: ortSearch.maxTotalResults,
+            search_context_size: ortSearch.contextSize,
+            max_characters: ortSearch.maxCharacters,
+          },
+        });
+
+      if (model.vndOrtWebFetch)
+        ortTools.push({
+          type: 'openrouter:web_fetch',
+          parameters: {
+            engine: model.vndOrtWebFetch.engine,
+            max_uses: model.vndOrtWebFetch.maxUses,
+            max_content_tokens: model.vndOrtWebFetch.maxContentTokens,
+          },
+        });
+
+      if (ortTools.length) {
+        payload.tools = [...(payload.tools || []), ...ortTools];
+        if (model.vndOrtMaxToolCalls !== undefined)
+          payload.max_tool_calls = model.vndOrtMaxToolCalls;
+      }
+    }
+  }
 
 
   // [OpenRouter, 2026-07-11] Sticky client session id: WE mint this (OpenRouter does not issue session ids) and send it
@@ -316,10 +369,14 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
     if (isTunneledAnt) {
       // Effort -> OpenRouter verbosity -> Anthropic upstream output_config.effort
       // OR verbosity supports low/medium/high/xhigh/max (2026-04-16). 'none'/'minimal' are OpenAI-only.
-      const antEffort = model.reasoningEffort; // ?? model.vndAntEffort;
+      const antThinkingOff = model.vndAntThinkingBudget === null;
+      let antEffort = model.reasoningEffort; // ?? model.vndAntEffort;
       if (antEffort) {
         if (antEffort === 'none' || antEffort === 'minimal') // domain validation
           throw new Error(`OpenRouter->Anthropic API does not support '${antEffort}' reasoning effort`);
+        // [2026-09-23, probed via OR] Opus 5 with thinking off accepts effort <= 'high' only (xhigh/max -> upstream 400) - clamp
+        if (antThinkingOff && (antEffort === 'xhigh' || antEffort === 'max'))
+          antEffort = 'high';
         payload.verbosity = antEffort;
       }
 
@@ -327,14 +384,16 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
       // vndAntThinkingBudget's presence indicates a user preference:
       // - 'adaptive': adaptive thinking (4.6+) - reasoning enabled, no explicit budget
       // - a number: explicit token budget (1024-32000)
-      // - null: disable thinking (don't set reasoning field)
+      // - null: thinking off - explicit `enabled: false`; omitting the field lets on-by-default models (Opus 5) think (probed 2026-09-23)
+      // - undefined: no preference (field omitted, the model's default)
       if (model.vndAntThinkingBudget === 'adaptive') {
         payload.reasoning = { enabled: true };
         delete payload.temperature;
       } else if (typeof model.vndAntThinkingBudget === 'number') {
         payload.reasoning = { enabled: true, max_tokens: model.vndAntThinkingBudget };
         delete payload.temperature;
-      } else /* null or undefined */ {
+      } else if (antThinkingOff) {
+        payload.reasoning = { enabled: false };
         // NOTE: with thinking disabled (null), we can still use temperature, so we don't delete it
         //       see the note on llms.parameters.ts: 'llmVndAntThinkingBudget'
       }
@@ -939,6 +998,11 @@ function _toOpenAIToolChoice(openAIDialect: OpenAIDialects, itp: AixTools_ToolsP
       if (openAIDialect === 'moonshot' && model.reasoningEffort !== 'none'
         && !(model.id === 'k3' || model.id.startsWith('kimi-k3') || model.id.startsWith('moonshot-v1')))
         return 'auto';
+      // [OpenRouter -> Anthropic, 2026-09-01] Fable/Mythos 5.x reject forced tool use and OR relays the 400 ('tool_choice: type "tool"
+      // and "any" are not supported for this model.', probed on claude-fable-5.1; Fable 5 400s with the older wording). Degrade to
+      // 'auto' - the steering hint injected into the system message above keeps our single-tool callers calling the tool.
+      if (openAIDialect === 'openrouter' && _isOrtForcedToolRejectingAnt(model.id))
+        return 'auto';
       return 'required';
     // DISABLED 2026-07-17 - forced named tool, see ToolsPolicy_schema. [Moonshot] probe-verified: named tool_choice
     // 400s ("tool_choice 'specified' is incompatible with thinking enabled") on all thinking-mode Kimi requests -
@@ -946,6 +1010,17 @@ function _toOpenAIToolChoice(openAIDialect: OpenAIDialects, itp: AixTools_ToolsP
     // case 'function_call':
     //   return { type: 'function' as const, function: { name: itp.function_call.name } };
   }
+}
+
+
+/**
+ * OpenRouter ids of Anthropic models that reject forced tool_choice upstream: Fable/Mythos 5 and 5.x, Opus 5.5, Sonnet 5.5, and the '~' router
+ * aliases resolving to them. '~anthropic/claude-opus-latest' (-> Opus 5.5 since 2026-09-22) silently falls back to Opus 5 on a forced
+ * call (probed), so it's degraded too, to stay on the aliased model. '~anthropic/claude-sonnet-latest' still resolves to Sonnet 5 (2026-09-28,
+ * forced call 200), so it's not listed.
+ */
+function _isOrtForcedToolRejectingAnt(modelId: string): boolean {
+  return /^~?anthropic\/claude-((fable|mythos)-(5|latest)|opus-(5\.5|latest)|sonnet-5\.5)/.test(modelId);
 }
 
 

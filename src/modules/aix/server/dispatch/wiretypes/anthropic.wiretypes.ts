@@ -13,6 +13,40 @@ const hotFixAntShipNoEmptyTextBlocks = true; // Replace empty text blocks with a
  *
  * ## Updates
  *
+ * ### 2026-09-28 - API Sync: Claude Sonnet 5.5 (launch-verified live)
+ * - Request.thinking: added `{ type: 'between_tools' }` - Sonnet 5.5's thinking-off ('disabled' and 'enabled' 400). Legal at effort
+ *   <= 'high' (xhigh/max 400 'not supported when thinking is disabled'); 'display' and 'block_binding' 400 alongside it.
+ * - Models: claude-sonnet-5-5 - forced tool_choice 400 (Fable 5.1 wording; both adapters' downgrades now cover it), temperature != 1 /
+ *   top_p / prefill / speed 400. Same tokenizer as Sonnet 5 (count_tokens within 0.2%).
+ * - Preserved thinking (docs): Sonnet 5.5 reads Sonnet 5 / Opus 4.8 / Haiku 4.5 and older blocks, not Opus 5.x / Fable / Mythos; no
+ *   other model reads Sonnet 5.5 blocks, and they are bound to the producing account (dropped elsewhere, request succeeds).
+ *
+ * ### 2026-09-22 - API Sync: Claude Opus 5.5 (launch-verified live)
+ * - Models: claude-opus-5-5 - Fable 5.1's surface at $4/$20: thinking.disabled/enabled 400 (at every effort, unlike Opus 5), forced
+ *   tool_choice 400 (same wording as Fable 5.1; both adapters' downgrades now cover it), computer_20251124 400 (toolset only).
+ *   No wire changes: usage.output_tokens_details, input_transformations (incl. 'thinking_mismatch_allowed', same fields) already parsed.
+ * - Preserved thinking (probed): Opus 5.5 blocks replay on Opus 5.5 and Fable 5.1, dropped with 'model_binding_mismatch' elsewhere.
+ * - NOT adopted (beta): tools defined inside mid-conversation system messages (inline-tools-2026-09-15, mcp-client-2026-09-15).
+ *
+ * ### 2026-09-21 - Doc sync: refusal category rename, prefix-mismatch attribution fix
+ * - StopDetails.category: 'military_weapons' (2026-06-30 sync) replaced by 'general_harms' in current docs - comment-only,
+ *   the `.or(z.string())` fallback already accepted any value.
+ * - Preserved thinking (`preserved-thinking` doc, read in full): confirmed the vendor's `reason: 'prefix_binding_mismatch'`
+ *   fires identically for an edited/deleted message, a changed tool list, or a changed system prompt - live-verified with
+ *   isolated probes (tool toggle alone, and a system-prompt-only change, both with zero message edits, both produced the
+ *   same reason). The parser's client-facing copy previously asserted 'History edited' unconditionally; renamed the cause
+ *   to 'prefix-changed' and reworded the notice to not claim a specific cause the vendor doesn't actually report.
+ *
+ * ### 2026-09-01 - API Sync: Claude Fable 5.1 / Mythos 5.1 (launch-verified live)
+ * - Request.thinking: added `block_binding.prefix_mismatch_behavior` ('error'|'drop_block'; beta thinking-binding-controls-2026-08-01).
+ *   Preserved thinking: Fable 5.1 blocks replay only on Fable/Mythos 5.1+ (older models drop them, unbilled) and, for accounts
+ *   created >= 2026-08-31, only against an unchanged system/tools/history prefix (400 otherwise). The adapter sends 'drop_block' on
+ *   every thinking request and relays the drops to the client as 'vnt' void-notice particles (one per reason).
+ * - Response: added `input_transformations` ([{ type: 'thinking_dropped', path, reason }], header-gated; on message_start when streaming)
+ * - Models: claude-fable-5-1 / claude-mythos-5-1 - Fable 5's surface; forced tool_choice still 400 (reworded), the adapter's downgrade covers '-5-1'
+ * - Request.thinking.display: added 'updates' (beta thinking-display-updates-2026-08-18) - progress lines only; not sent, 'summarized' includes them
+ * - NOT adopted (beta): per-message effort (mid-conversation-output-config-2026-07-01), turn-scoped system messages (mid-conversation-system-clear-at-2026-08-21)
+ *
  * ### 2026-06-30 - API Sync: new tool versions, refusal categories, Sonnet 5 verified
  * - Tools: Added web_search_20260318 / web_fetch_20260318 (GA, 2026-06-11) - adds `response_inclusion` ('full'|'excluded')
  *   to drop the nested search/fetch call+result pair from the response once consumed by a completed code-execution call
@@ -306,7 +340,7 @@ export namespace AnthropicWire_Blocks {
     ]),
     input: z.union([
       z.object({ query: z.string() }), // web_search
-      z.object({ url: z.string() }), // web_fetch
+      z.object({ url: z.string(), use_cache: z.boolean().optional() }), // web_fetch (use_cache: the model's per-call cache bypass, seen 2026-09-24 on the _20260318 tool)
       z.object({ code: z.string() }), // code_execution
       z.object({ command: z.string() }), // bash_code_execution
       z.object({ command: z.string(), path: z.string() }), // text_editor_code_execution (+ file_text, old_str, new_str, view_range, etc.)
@@ -910,7 +944,9 @@ export namespace AnthropicWire_API_Message_Create {
    */
   const StopDetails_schema = z.object({
     type: z.enum(['refusal']).or(z.string()),
-    category: z.enum(['cyber', 'bio', 'reasoning_extraction', 'frontier_llm', 'military_weapons']).or(z.string()).nullish(),
+    // [2026-09-21] Docs now list 'general_harms' where 'military_weapons' stood on 2026-06-30 - renamed/replaced upstream, not additive.
+    // No functional impact (the `.or(z.string())` fallback already covers any category verbatim), comment-only sync.
+    category: z.enum(['cyber', 'bio', 'reasoning_extraction', 'frontier_llm', 'general_harms']).or(z.string()).nullish(),
     explanation: z.string().nullish(),
     /** [Anthropic, 2026-06-09] Model suggested for a direct retry when a server-side fallback could not run (e.g. fallback model rate-limited). Hint only, may be null. */
     recommended_model: z.string().nullish(),
@@ -919,6 +955,15 @@ export namespace AnthropicWire_API_Message_Create {
   /// Request
 
   export type Request = z.infer<typeof Request_schema>;
+  /**
+   * [Anthropic, 2026-09-01] Preserved-thinking controls (beta `thinking-binding-controls-2026-08-01`): what to do with a replayed
+   * thinking block whose conversation prefix changed (Fable 5.1+) - 'error' (default) 400s, 'drop_block' drops it and every later
+   * thinking block, reported in the response `input_transformations`. Requires the header; Bedrock rejects the field.
+   */
+  const ThinkingBlockBinding_schema = z.object({
+    prefix_mismatch_behavior: z.enum(['error', 'drop_block']),
+  });
+
   export const Request_schema = z.object({
     /**
      * (required) The maximum number of tokens to generate before stopping.
@@ -1031,21 +1076,28 @@ export namespace AnthropicWire_API_Message_Create {
      * When enabled, responses include thinking content blocks showing Claude's thinking process before the final answer.
      *
      * - display: 'omitted': empty thinking field, preserves signature for multi-turn, faster streaming
+     * - block_binding: [2026-09-01] preserved-thinking controls, see ThinkingBlockBinding_schema
      */
     thinking: z.union([
       // [Anthropic, 4.6+] Adaptive thinking - Claude decides when and how much to think
       z.object({
         type: z.literal('adaptive'),
-        display: z.enum(['summarized' /* default */, 'omitted']).optional(),
+        // 'updates' (beta thinking-display-updates-2026-08-18): progress lines between tool calls only - 400 without the header
+        display: z.enum(['summarized' /* default */, 'omitted', 'updates']).optional(),
+        block_binding: ThinkingBlockBinding_schema.optional(),
       }),
       // Requires a minimum budget of 1,024 tokens and counts towards your max_tokens limit.
       z.object({
         type: z.literal('enabled'),
         budget_tokens: z.number(),
         display: z.enum(['summarized' /* default */, 'omitted']).optional(),
+        block_binding: ThinkingBlockBinding_schema.optional(),
       }),
       // having this for completeness, but seems like it's not needed / can be omitted
       z.object({ type: z.literal('disabled') }),
+      // [Anthropic, 2026-09-28] Sonnet 5.5's lowest setting ('disabled' 400s): no up-front thinking, progress updates between
+      // tool calls still come back as thinking blocks with text. Effort <= 'high' only; no other field ('display'/'block_binding' 400)
+      z.object({ type: z.literal('between_tools') }),
     ]).optional(),
 
     /**
@@ -1129,6 +1181,17 @@ export namespace AnthropicWire_API_Message_Create {
      * In streaming, stop_details is null at message_start and appears on message_delta alongside stop_reason.
      */
     stop_details: StopDetails_schema.nullish(),
+
+    /**
+     * [Anthropic, 2026-09-01] Thinking blocks dropped from the request, only with the `thinking-binding-controls-2026-08-01` header.
+     * reason: 'model_binding_mismatch' (an older model can't read a newer block) | 'prefix_binding_mismatch' (history edited, with
+     * block_binding 'drop_block'). Streaming: on the message_start message. Loosely typed for forward-compat.
+     */
+    input_transformations: z.array(z.object({
+      type: z.string(), // 'thinking_dropped'
+      path: z.string(), // 'messages.1.content.0'
+      reason: z.string(),
+    })).nullish(),
 
     /**
      * Billing and rate-limit usage.

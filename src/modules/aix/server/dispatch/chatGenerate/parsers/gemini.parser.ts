@@ -43,6 +43,7 @@ export function createGeminiGenerateContentResponseParser(requestedModelName: st
   let collapsedTextPartForReasoning = false;
   let skipComputingTotalsOnce = isStreaming;
   let groundingIndexNumber = 0;
+  let nCodeExec = 0;
 
   // this can throw, it's caught by the caller
   return function(pt: IParticleTransmitter, rawEventData: string): void {
@@ -100,7 +101,8 @@ export function createGeminiGenerateContentResponseParser(requestedModelName: st
     // -> Stats - before candidates to endings won't interfere/block
     if (generationChunk.usageMetadata) {
       const metricsUpdate: AixWire_Particles.CGSelectMetrics = {
-        TIn: generationChunk.usageMetadata.promptTokenCount,
+        // tool-use prompt tokens (code execution) bill as input, outside promptTokenCount
+        TIn: generationChunk.usageMetadata.promptTokenCount + (generationChunk.usageMetadata.toolUsePromptTokenCount ?? 0),
         TOut: generationChunk.usageMetadata.candidatesTokenCount,
       };
 
@@ -113,9 +115,14 @@ export function createGeminiGenerateContentResponseParser(requestedModelName: st
       // Subtract auto-cached (read) input tokens
       if (generationChunk.usageMetadata.cachedContentTokenCount) {
         metricsUpdate.TCacheRead = generationChunk.usageMetadata.cachedContentTokenCount;
-        if ((metricsUpdate.TIn ?? 0) > metricsUpdate.TCacheRead)
+        if ((metricsUpdate.TIn ?? 0) >= metricsUpdate.TCacheRead)
           metricsUpdate.TIn = (metricsUpdate.TIn ?? 0) - metricsUpdate.TCacheRead;
       }
+
+      // Served tier -> confirmed price multiplier
+      const $xPrice = _gemPriceMultiplier(generationChunk.usageMetadata.serviceTier);
+      if ($xPrice !== undefined)
+        metricsUpdate.$xPrice = $xPrice;
 
       if (isStreaming && timeToFirstEvent !== undefined)
         metricsUpdate.dtStart = timeToFirstEvent;
@@ -123,8 +130,7 @@ export function createGeminiGenerateContentResponseParser(requestedModelName: st
       // the first end-1 packet will be skipped (when streaming)
       if (!skipComputingTotalsOnce) {
         metricsUpdate.dtAll = Date.now() - parserCreationTimestamp;
-        if (!isStreaming && metricsUpdate.dtAll > timeToFirstEvent)
-          metricsUpdate.dtInner = metricsUpdate.dtAll - timeToFirstEvent;
+        // non-streaming: no dtInner - the first event is the whole response, so (dtAll - timeToFirstEvent) is just our parse time
         if (isStreaming && metricsUpdate.TOut)
           metricsUpdate.vTOutInner = Math.round(100 * 1000 /*ms/s*/ * metricsUpdate.TOut / (metricsUpdate.dtInner || metricsUpdate.dtAll)) / 100;
       }
@@ -241,6 +247,7 @@ export function createGeminiGenerateContentResponseParser(requestedModelName: st
             if (DEV_DEBUG_MISSING_IDS && !mPart.executableCode.id)
               console.log('[DEV] Gemini executableCode missing id');
             pt.addCodeExecutionInvocation(mPart.executableCode.id ?? null, mPart.executableCode.language || '', mPart.executableCode.code || '', 'gemini_auto_inline');
+            pt.updateMetrics({ nCodeExec: ++nCodeExec }); // counted, not per-call billed
             break;
 
           // <- CodeExecutionResultPart
@@ -320,7 +327,9 @@ export function createGeminiGenerateContentResponseParser(requestedModelName: st
         }
       }
 
-      // -> Candidates[0] -> Grounding Metadata
+      // -> Candidates[0] -> Grounding Metadata: executed queries bill per query
+      if (candidate0.groundingMetadata?.webSearchQueries?.length)
+        pt.updateMetrics({ nWebSearch: candidate0.groundingMetadata.webSearchQueries.length });
       if (candidate0.groundingMetadata?.groundingChunks?.length) {
         /**
          * TODO: improve parsing of grounding metadata, including:
@@ -555,4 +564,20 @@ function _geminiJsonSummary(v: unknown, maxLen = 512): string | undefined {
   const ellipsis = `...[${(s.length - maxLen).toLocaleString()} chars]...`;
   const half = Math.floor((maxLen - ellipsis.length) / 2);
   return s.slice(0, half) + ellipsis + s.slice(-half);
+}
+
+
+/** Served tier -> confirmed multiplier: standard 1x, flex and batch 0.5x, priority 1.8x */
+function _gemPriceMultiplier(serviceTier: string | null | undefined): number | undefined {
+  switch (serviceTier) {
+    case 'standard':
+      return 1;
+    case 'flex':
+    case 'batch':
+      return 0.5;
+    case 'priority':
+      return 1.8;
+    default:
+      return undefined;
+  }
 }

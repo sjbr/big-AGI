@@ -1,17 +1,21 @@
 import * as React from 'react';
 
 import type { SxProps } from '@mui/joy/styles/types';
-import { Box, Chip, ColorPaletteProp, Divider, Tooltip } from '@mui/joy';
+import { Box, Chip, ChipDelete, ColorPaletteProp, Divider, Tooltip } from '@mui/joy';
 import BrushRoundedIcon from '@mui/icons-material/BrushRounded';
 import CheckRoundedIcon from '@mui/icons-material/CheckRounded';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import CodeIcon from '@mui/icons-material/Code';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import WarningRoundedIcon from '@mui/icons-material/WarningRounded';
+import PauseRoundedIcon from '@mui/icons-material/PauseRounded';
 import RepeatIcon from '@mui/icons-material/Repeat';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 
 import { BlocksContainer } from '~/modules/blocks/BlocksContainers';
+import { TooltipOutlined } from '~/common/components/TooltipOutlined';
 import { RenderCodeMemo } from '~/modules/blocks/code/RenderCode';
 import { ScaledTextBlockRenderer } from '~/modules/blocks/ScaledTextBlockRenderer';
 
@@ -51,6 +55,45 @@ const _styles = {
     fontSize: '1rem',
     mr: 0.5,
     animation: `${animationSpinHalfPause} 2s ease-in-out infinite`,
+  },
+
+  noticeChip: {
+    // mx: 1.5,
+    my: '1px',
+    pl: 1.5,
+    pr: 1.75,
+    minHeight: '1.5rem', // similar parts, modelOps and paired tools, are 1.75rem
+    gap: 1,
+    color: 'text.tertiary',
+    whiteSpace: 'normal',
+    wordBreak: 'break-word',
+  },
+  noticeChipWarn: {
+    my: '1px',
+    pl: 1.5,
+    pr: 1.75,
+    minHeight: '1.5rem',
+    gap: 1,
+    whiteSpace: 'normal',
+    wordBreak: 'break-word',
+  },
+
+  dividerChip: {
+    my: 1,
+    pl: 1.5,
+    pr: 1.75,
+    minHeight: '1.5rem',
+    gap: 1,
+    color: 'text.tertiary',
+    whiteSpace: 'nowrap',
+  },
+  dividerCode: {
+    fontFamily: 'code',
+  },
+  dividerDetail: {
+    maxWidth: 720,
+    color: 'text.primary',
+    fontSize: 'xs',
   },
 
   opList: {
@@ -112,6 +155,50 @@ function RenderChipFollowUp(props: {
       {props.text}
     </Chip>
   )
+}
+
+
+// --- Render Notice ---
+
+function RenderChipNotice({ text, detail, warn, fragmentId, onFragmentDelete }: {
+  text: string,
+  detail?: string, // shown on hover
+  warn?: boolean, // the sender judged the notice unexpected: warning color and icon
+  fragmentId: DMessageFragmentId,
+  onFragmentDelete?: (fragmentId: DMessageFragmentId) => void,
+}) {
+  const chip = (
+    <Chip
+      size='sm'
+      color={warn ? 'warning' : undefined}
+      variant={warn ? 'soft' : undefined}
+      startDecorator={warn ? <WarningRoundedIcon /> : <InfoOutlinedIcon />}
+      endDecorator={!onFragmentDelete ? undefined : <ChipDelete onDelete={() => onFragmentDelete(fragmentId)} />}
+      sx={warn ? _styles.noticeChipWarn : _styles.noticeChip}
+    >
+      {text}
+    </Chip>
+  );
+  return !detail ? chip : <Tooltip title={detail} variant='outlined' placement='top' arrow sx={_styles.opChipTooltip}>{chip}</Tooltip>;
+}
+
+/** Flow divider: the generation continued in a new upstream request here (e.g. Anthropic `pause_turn`); `code` spans in the text render monospaced */
+function RenderDividerNotice({ text, detail }: { text: string, detail?: string }) {
+  const chip = (
+    <Chip size='sm' startDecorator={<PauseRoundedIcon />} sx={_styles.dividerChip}>
+      {text.split('`').map((segment, i) => i % 2 ? <Box key={i} component='span' sx={_styles.dividerCode}>{segment}</Box> : segment)}
+    </Chip>
+  );
+  const detailLines = detail?.split('\n');
+  return (
+    <Divider>
+      {!detailLines ? chip : (
+        <TooltipOutlined size='lg' color='success' enableInteractive title={<Box sx={_styles.dividerDetail}>{detailLines.map((line, i) => <div key={i}>{line}</div>)}</Box>}>
+          {chip}
+        </TooltipOutlined>
+      )}
+    </Divider>
+  );
 }
 
 
@@ -380,6 +467,7 @@ interface BlockPartPlaceholderProps {
   messagePendingIncomplete: boolean,
   showAsDataStreamViz?: boolean,
   zenMode?: boolean,
+  showNotices?: boolean, // show void dismissible notices
 
   // used for self deletion
   fragmentId: DMessageFragmentId,
@@ -388,16 +476,16 @@ interface BlockPartPlaceholderProps {
 }
 
 /**
- * Transient placeholder: follow-ups, retries, model-op progress (with PFC nesting), or italic text.
+ * Transient placeholder: follow-ups, retries, model-op progress (with PFC nesting), dismissible notices, or italic text.
  */
-export function BlockPartPlaceholder({ placeholderPart, contentScaling, messagePendingIncomplete, showAsDataStreamViz, zenMode, fragmentId, onFragmentDelete }: BlockPartPlaceholderProps){
+export function BlockPartPlaceholder({ placeholderPart, contentScaling, messagePendingIncomplete, showAsDataStreamViz, zenMode, showNotices, fragmentId, onFragmentDelete }: BlockPartPlaceholderProps){
 
   // state
   const [showVisualization, setShowVisualization] = React.useState(false);
 
   // derived state
-  const { pText, pType, opLog, aixControl } = placeholderPart;
-  const shouldShowViz = showAsDataStreamViz && !opLog?.length && !aixControl;
+  const { pText, pDetail, pType, opLog, aixControl } = placeholderPart;
+  const shouldShowViz = showAsDataStreamViz && !opLog?.length && !aixControl && pType !== 'notice';
 
 
   // [effect] if allowed trigger the viz effect in 6.28 seconds, otherwise clear it
@@ -421,6 +509,13 @@ export function BlockPartPlaceholder({ placeholderPart, contentScaling, messageP
   // 2. AIX Control renderer - only for error correction retry
   if (aixControl?.ctl)
     return <RenderChipAixControl text={pText} aixControl={aixControl} />;
+
+  // 2b. Neutral dismissible notice (e.g. earlier reasoning dropped), or a flow divider (the generation continued in a new request here)
+  if (pType === 'notice') return !showNotices ? null : placeholderPart.pNoticeKind === 'flow-cont' ? (
+    <RenderDividerNotice text={pText} detail={pDetail} />
+  ) : (
+    <RenderChipNotice text={pText} detail={pDetail} warn={placeholderPart.pNoticeLevel === 'warn'} fragmentId={fragmentId} onFragmentDelete={onFragmentDelete} />
+  );
 
   // 3. Model operation render - stacked list when multiple operations, single chip otherwise
   if (opLog?.length) return zenMode ? null : (

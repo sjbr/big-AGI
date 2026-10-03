@@ -58,11 +58,18 @@ type _EditorialDefaultsTable = {
 export const EditorialDefaults = {
 
   primaryChat: [
-    // TEMP 2026-06-16: Fable 5 held - not recommended to new users via Auto picks. Uncomment to restore.
-    // { vendor: 'anthropic',  modelId: 'claude-fable-5' },
-    // { vendor: 'bedrock',    modelId: 'us.anthropic.claude-fable-5' },
-    // { vendor: 'bedrock',    modelId: 'global.anthropic.claude-fable-5' },
-    // { vendor: 'openrouter', modelId: 'anthropic/claude-fable-5' },
+    // LAUNCHED 2026-09-22: claude-opus-5-5 is the top pick, ahead of Fable 5.1 ($4/$20 vs $10/$50, 1M ctx, always-on thinking, default effort medium)
+    { vendor: 'anthropic',  modelId: 'claude-opus-5-5' },
+    { vendor: 'bedrock',    modelId: 'us.anthropic.claude-opus-5-5' },
+    { vendor: 'bedrock',    modelId: 'global.anthropic.claude-opus-5-5' },
+    { vendor: 'openrouter', modelId: 'anthropic/claude-opus-5-5' },
+    // Fable tier (hold lifted 2026-09-01; the 06-16 hold was the export-control suspension): 5.1 on the API, Bedrock stays
+    // on 5 (5.1 account-gated there), OpenRouter both. Single always-adaptive entries, so no '-thinking' suffix.
+    { vendor: 'anthropic',  modelId: 'claude-fable-5-1' },
+    { vendor: 'bedrock',    modelId: 'us.anthropic.claude-fable-5' },
+    { vendor: 'bedrock',    modelId: 'global.anthropic.claude-fable-5' },
+    { vendor: 'openrouter', modelId: 'anthropic/claude-fable-5-1' },
+    { vendor: 'openrouter', modelId: 'anthropic/claude-fable-5' },
     // LAUNCHED 2026-07-24: claude-opus-5 replaces Opus 4.8 as the top Anthropic pick ($5/$25, 1M ctx, thinking
     // on by default). Single always-adaptive entry (no variant), so no '-thinking' Bedrock suffix.
     { vendor: 'anthropic',  modelId: 'claude-opus-5' },
@@ -77,16 +84,26 @@ export const EditorialDefaults = {
     { vendor: 'bedrock',    modelId: 'us.anthropic.claude-opus-4-7-thinking' },
     { vendor: 'bedrock',    modelId: 'global.anthropic.claude-opus-4-7-thinking' },
     { vendor: 'openrouter', modelId: 'anthropic/claude-opus-4-7' },
+    { vendor: 'openai',     modelId: 'gpt-6.1-sol' }, // 2026-09-29 - "near-Astra" on coding, computer use and professional work at a fifth of Astra's price ($2/$10)
+    { vendor: 'openrouter', modelId: 'openai/gpt-6.1-sol' },
+    { vendor: 'openai',     modelId: 'gpt-6-astra' }, // 2026-09-03 - new flagship; $10/$50 (2.5x Sol per token, OpenAI claims lower cost per task)
+    { vendor: 'openrouter', modelId: 'openai/gpt-6-astra' },
+    { vendor: 'openai',     modelId: 'gpt-6-sol' }, // 2026-09-22 - succeeds 5.6 Sol at half the price ($2/$10), ~1.5x its streaming speed
+    { vendor: 'openrouter', modelId: 'openai/gpt-6-sol' },
     { vendor: 'openai',     modelId: 'gpt-5.6-sol' }, // 2026-07-09 GA - flagship tier, same price as 5.5
     { vendor: 'openrouter', modelId: 'openai/gpt-5.6-sol' },
     { vendor: 'openai',     modelId: 'gpt-5.5' },
     { vendor: 'openrouter', modelId: 'openai/gpt-5.5' },
+    { vendor: 'googleai',   modelId: 'models/gemini-4-argon' }, // SPECULATIVE: announced 2026-09-30, API-gated; Elo 1525 prelim (#1), $2/$10 intro. Prefix match also takes '-preview'
+    { vendor: 'openrouter', modelId: 'google/gemini-4-argon' },
     { vendor: 'googleai',   modelId: 'models/gemini-3.7-flash' }, // 2026-08-13 GA - newest Flash flagship (Elo 1490 prelim vs 1485, same intro price as 3.6, big agentic/coding gains)
     { vendor: 'googleai',   modelId: 'models/gemini-3.6-flash' }, // 2026-07-21 GA - above 3.5 Flash (Elo 1485 vs 1476, cheaper output)
     { vendor: 'googleai',   modelId: 'models/gemini-3.5-flash' },
     { vendor: 'anthropic',  modelId: 'claude-opus-4-6' },
     { vendor: 'googleai',   modelId: 'models/gemini-3.1-pro-preview' },
+    { vendor: 'anthropic',  modelId: 'claude-sonnet-5-5' }, // launched 2026-09-28
     { vendor: 'anthropic',  modelId: 'claude-sonnet-4-6' },
+    { vendor: 'xai',        modelId: 'grok-4.7' }, // 2026-09-21 GA - larger base than 4.6, same price
     { vendor: 'xai',        modelId: 'grok-4.6' }, // 2026-08-12 GA - frontier for coding/agentic/knowledge work, extends 4.5
     { vendor: 'xai',        modelId: 'grok-4.5' },
     { vendor: 'xai',        modelId: 'grok-4.3' },
@@ -109,15 +126,20 @@ export const EditorialDefaults = {
     { vendor: 'openrouter', modelId: 'google/gemini-3.5-flash' },
     { vendor: 'openai',     modelId: 'gpt-5.3-codex' },
     { vendor: 'openrouter', modelId: 'openai/gpt-5.3-codex' },
+    { vendor: 'openai',     modelId: 'gpt-6.1-sol' }, // 2026-09-29 - "exceptionally strong on agentic coding", same price as 6 Sol
+    { vendor: 'openai',     modelId: 'gpt-6-sol' }, // 2026-09-22 - "built for complex coding and agentic workflows"
     { vendor: 'openai',     modelId: 'gpt-5.6-sol' }, // 2026-07-09 GA - "strongest yet for agentic coding"; codex still preferred for apply
     { vendor: 'openai',     modelId: 'gpt-5.5' },
     { vendor: 'anthropic',  modelId: 'claude-sonnet-4-6' },
     { vendor: 'bedrock',    modelId: 'us.anthropic.claude-sonnet-4-6' },
     { vendor: 'bedrock',    modelId: 'global.anthropic.claude-sonnet-4-6' },
     { vendor: 'openrouter', modelId: 'anthropic/claude-sonnet-4-6' },
+    { vendor: 'anthropic',  modelId: 'claude-sonnet-5-5' }, // launched 2026-09-28 - after 4.6, which doesn't think by default
+    { vendor: 'anthropic',  modelId: 'claude-opus-5-5' }, // launched 2026-09-22
     { vendor: 'anthropic',  modelId: 'claude-opus-5' }, // launched 2026-07-24
     { vendor: 'anthropic',  modelId: 'claude-opus-4-8' },
     { vendor: 'anthropic',  modelId: 'claude-opus-4-7' },
+    { vendor: 'xai',        modelId: 'grok-4.7' }, // 2026-09-21 GA - larger base than 4.6, same price
     { vendor: 'xai',        modelId: 'grok-4.6' }, // xAI frontier for coding/agentic; new Grok Build default (2026-08-12)
     { vendor: 'xai',        modelId: 'grok-4.5' },
     { vendor: 'xai',        modelId: 'grok-build-0.1' },
@@ -125,13 +147,15 @@ export const EditorialDefaults = {
     { vendor: 'zai',        modelId: 'glm-5.2' },
     { vendor: 'zai',        modelId: 'glm-5' },
     { vendor: 'moonshot',   modelId: 'kimi-k2.6' },
-    { vendor: 'deepseek',   modelId: 'deepseek-v4-flash' },
+    { vendor: 'deepseek',   modelId: 'deepseek-flash' },
     // NVIDIA NIM: free trial catalog, tail picks (z-ai/glm-5.2 dropped: NVIDIA EOL 2026-08-24)
     { vendor: 'nvidianim',  modelId: 'nvidia/nemotron-3-super-120b-a12b' }, // agentic/tool-use tuned, 12B active
     { vendor: 'nvidianim',  modelId: 'deepseek-ai/deepseek-v4-flash-0731' }, // dated checkpoint: the undated id is 410 Gone on NVIDIA
   ],
 
   fastUtil: [
+    { vendor: 'openai',     modelId: 'gpt-6-luna' }, // 2026-09-22 - half 5.6 Luna's price ($0.10/$0.50), streamed faster side by side (~117 vs ~92 tok/s)
+    { vendor: 'openrouter', modelId: 'openai/gpt-6-luna' },
     { vendor: 'openai',     modelId: 'gpt-5.6-luna' }, // 2026-07-09 GA - measured ~160 tok/s (faster than 5.4-mini), 1M ctx, $0.20/$1.20
     { vendor: 'openrouter', modelId: 'openai/gpt-5.6-luna' },
     { vendor: 'openai',     modelId: 'gpt-5.4-mini' },
@@ -151,7 +175,7 @@ export const EditorialDefaults = {
     { vendor: 'xai',        modelId: 'grok-4.3' },
     { vendor: 'zai',        modelId: 'glm-5.3-flash' }, // 2026-08-27: 18B active, $0.15/$0.5 - the actual Z.ai fast tier (5.2 was a pre-flash placeholder)
     { vendor: 'zai',        modelId: 'glm-5.2' },
-    { vendor: 'deepseek',   modelId: 'deepseek-v4-flash' },
+    { vendor: 'deepseek',   modelId: 'deepseek-flash' },
     // NVIDIA NIM: free trial catalog, tail picks (nemotron-3-nano-30b-a3b and nemotron-nano-9b-v2 dropped: NVIDIA EOL 2026-08-25)
     { vendor: 'nvidianim',  modelId: 'nvidia/nemotron-3.5-lightning-30b-a3b' }, // fastest Nemotron MoE, 3B active, 1M ctx
     { vendor: 'nvidianim',  modelId: 'openai/gpt-oss-20b' },
@@ -165,10 +189,14 @@ export const EditorialDefaults = {
     { vendor: 'googleai',   modelId: 'models/gemini-3.5-flash' },
     { vendor: 'openrouter', modelId: 'google/gemini-3.5-flash' },
     { vendor: 'anthropic',  modelId: 'claude-sonnet-4-6' },
+    { vendor: 'anthropic',  modelId: 'claude-sonnet-5-5' }, // launched 2026-09-28 - after 4.6, which doesn't think by default
+    { vendor: 'anthropic',  modelId: 'claude-opus-5-5' }, // launched 2026-09-22
     { vendor: 'anthropic',  modelId: 'claude-opus-5' }, // launched 2026-07-24
     { vendor: 'anthropic',  modelId: 'claude-opus-4-8' },
     { vendor: 'anthropic',  modelId: 'claude-opus-4-7' },
     { vendor: 'openrouter', modelId: 'anthropic/claude-sonnet-4-6' },
+    { vendor: 'openai',     modelId: 'gpt-6-luna' }, // 2026-09-22 - vision
+    { vendor: 'openrouter', modelId: 'openai/gpt-6-luna' },
     { vendor: 'openai',     modelId: 'gpt-5.6-luna' }, // 2026-07-09 GA - vision, faster and a generation newer than 5.4-mini
     { vendor: 'openrouter', modelId: 'openai/gpt-5.6-luna' },
     { vendor: 'openai',     modelId: 'gpt-5.4-mini' },
@@ -200,7 +228,9 @@ export function llmsEditorialPickForDomain(
       : undefined;
   if (!entries) return undefined;
   for (const { vendor, modelId } of entries) {
-    const hit = filteredLlms.find(llm => llm.vId === vendor && _editorialMatch(llm, modelId));
+    // exact first: the prefix rule would otherwise take OpenRouter's 'openai/gpt-6-luna-pro' (listed first) for 'openai/gpt-6-luna'
+    const hit = filteredLlms.find(llm => llm.vId === vendor && llm.initialParameters?.llmRef === modelId)
+      ?? filteredLlms.find(llm => llm.vId === vendor && _editorialMatch(llm, modelId));
     if (hit) return hit.id;
   }
   return undefined;
@@ -242,10 +272,10 @@ function _isGeminiFamily(llm: DLLM): boolean {
 }
 
 
-/** Tolerant id match: exact `llmRef`, dated-suffix prefix on `llmRef`, or service-prefixed DLLM id (e.g. `anthropic-1-claude-opus-4-7`). */
+/** Tolerant id match: exact `llmRef`, dated-suffix prefix on `llmRef`, or dot/dash-equivalent (OpenRouter's 'claude-opus-4.8' vs our 'claude-opus-4-8'). */
 function _editorialMatch(llm: DLLM, editorialId: string): boolean {
   const llmRef = llm.initialParameters?.llmRef;
-  return typeof llmRef === 'string' && (llmRef === editorialId || llmRef.startsWith(editorialId));
+  return typeof llmRef === 'string' && (llmRef === editorialId || llmRef.startsWith(editorialId) || llmRef.replace(/\./g, '-') === editorialId.replace(/\./g, '-'));
   // this would match the mdoel in alternative services I guess - but also notice we use the llmRef correctly, not the DLLMId
   // return llm.id === editorialId || llm.id.endsWith(`-${editorialId}`);
 }

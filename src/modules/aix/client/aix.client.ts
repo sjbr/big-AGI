@@ -1,4 +1,5 @@
 import { findServiceAccessOrThrow } from '~/modules/llms/vendors/vendor.helpers';
+import { ortWebToolsToAixModel } from '~/modules/llms/vendors/openrouter/openrouter.webtools';
 
 import { vertexLinksAutoResolveFragments } from '~/modules/google/vertexai.client';
 
@@ -77,8 +78,8 @@ export function aixCreateModelFromLLMOptions(
     llmVndBedrockAPI,
     llmVndGeminiAgentViz, llmVndGeminiAspectRatio, llmVndGeminiImageSize, llmVndGeminiCodeExecution, llmVndGeminiComputerUse, llmVndGeminiGoogleSearch, llmVndGeminiMediaResolution, llmVndGeminiThinkingBudget,
     // llmVndMoonshotWebSearch,
-    llmVndOaiReasoningMode, llmVndOaiRestoreMarkdown, llmVndOaiVerbosity, llmVndOaiWebSearchContext, llmVndOaiWebSearchGeolocation, llmVndOaiImageGeneration, llmVndOaiCodeInterpreter,
-    llmVndOrtWebSearch,
+    llmVndOaiReasoningMode, llmVndOaiRestoreMarkdown, llmVndOaiServiceTier, llmVndOaiVerbosity, llmVndOaiWebSearchContext, llmVndOaiWebSearchGeolocation, llmVndOaiImageGeneration, llmVndOaiCodeInterpreter,
+    llmVndOrtWebFetch, llmVndOrtWebSearch, llmVndOrtWebToolsAdvanced,
     llmVndPerplexityDateFilter, llmVndPerplexitySearchMode,
     llmVndXaiCodeExecution, llmVndXaiSearchInterval, llmVndXaiWebSearch, llmVndXaiXSearch, llmVndXaiXSearchHandles,
   } = {
@@ -169,15 +170,16 @@ export function aixCreateModelFromLLMOptions(
 
     // OpenAI
     ...(llmVndOaiReasoningMode ? { vndOaiReasoningMode: llmVndOaiReasoningMode } : {}),
+    ...(llmVndOaiServiceTier ? { vndOaiServiceTier: llmVndOaiServiceTier } : {}),
     ...(llmVndOaiResponsesAPI ? { vndOaiResponsesAPI: true } : {}),
     ...(llmVndOaiRestoreMarkdown ? { vndOaiRestoreMarkdown: llmVndOaiRestoreMarkdown } : {}),
     ...(llmVndOaiVerbosity ? { vndOaiVerbosity: llmVndOaiVerbosity } : {}),
     ...(llmVndOaiWebSearchContext ? { vndOaiWebSearchContext: llmVndOaiWebSearchContext } : {}),
-    ...(llmVndOaiImageGeneration ? { vndOaiImageGeneration: (llmVndOaiImageGeneration as any /* backward comp */) === true ? 'mq' : llmVndOaiImageGeneration } : {}),
+    ...(llmVndOaiImageGeneration ? { vndOaiImageGeneration: llmVndOaiImageGeneration } : {}), // legacy values are migrated by getAllModelParameterValues
     ...(llmVndOaiCodeInterpreter === 'auto' ? { vndOaiCodeInterpreter: llmVndOaiCodeInterpreter } : {}),
 
-    // OpenRouter
-    ...(llmVndOrtWebSearch === 'auto' ? { vndOrtWebSearch: 'auto' } : {}),
+    // OpenRouter - server tools, or the legacy plugin on endpoints without tool support
+    ...ortWebToolsToAixModel(llmInterfaces, llmVndOrtWebSearch, llmVndOrtWebFetch, llmVndOrtWebToolsAdvanced),
 
     // Perplexity
     ...(llmVndPerplexityDateFilter ? { vndPerplexityDateFilter: llmVndPerplexityDateFilter } : {}),
@@ -695,7 +697,7 @@ function _finalizeLlmMetricsWithCosts(cgMetricsLg: undefined | DMetricsChatGener
 
   // Compute costs
   const logLlmRefId = getAllModelParameterValues(llm.initialParameters, llm.userParameters).llmRef || llm.id;
-  const adjChatPricing = llmChatPricing_adjusted(llm);
+  const adjChatPricing = llmChatPricing_adjusted(llm, cgMetricsLg?.$xPrice); // the served tier (when echoed) wins over the requested one
   const costs = metricsComputeChatGenerateCostsMd(metricsMd, adjChatPricing, logLlmRefId);
   if (!costs) {
     // FIXME: we shall warn that the costs are missing, as the only way to get pricing is through surfacing missing prices
@@ -932,7 +934,7 @@ async function _aixChatGenerateContent_LL_unlocked(
   // - in tRPC mode the server-side transforms handle everything elegantly - but we still add failsafes in case the server has a transform issue
   const particleTransforms: ReassemblerParticleTransforms[] = [];
   if (aixAccess.dialect === 'anthropic' && aixModel.vndAntTransformInlineFiles /* && clientSideChatGenerate */)
-    particleTransforms.push(createClientAnthropicFileInlineTransform(aixAccess, aixModel.vndAntTransformInlineFiles === 'inline-file-and-delete'));
+    particleTransforms.push(createClientAnthropicFileInlineTransform(aixAccess, aixModel.vndAntTransformInlineFiles));
 
 
   // Particles Reassembler - owns the accumulator, reused across Client-side retries
