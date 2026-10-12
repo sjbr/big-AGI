@@ -174,7 +174,7 @@ export class ContentReassembler {
     // Classify termination -> outcome + tokenStopReason + optional error message
     const { outcome, tsr, errorMessage } = this._classifyTermination();
     // termination -> legacy UI data pt
-    if (tsr) this.S.generator = { ...this.S.generator, tokenStopReason: tsr };
+    this.S.generator = { ...this.S.generator, tokenStopReason: tsr, endedAt: Date.now() };
     // termination -> User/AI issue message
     if (errorMessage) this._appendErrorFragment(errorMessage);
 
@@ -1264,7 +1264,8 @@ export class ContentReassembler {
 
   private onMetrics({ metrics }: Extract<AixWire_Particles.ChatGenerateOp, { cg: 'set-metrics' }>): void {
     // type check point for AixWire_Particles.CGSelectMetrics -> DMetricsChatGenerate_Lg
-    this.S.cgMetricsLg = metrics;
+    // copy: we mutate cgMetricsLg (TsR, T, dtWall), while the particle is shared with the AI Inspector and, in CSF, with the server's transmitter
+    this.S.cgMetricsLg = { ...metrics };
     metricsPendChatGenerateLg(this.S.cgMetricsLg); // sets TsR='pending'
     // Reflect preliminary token counts on the generator during streaming, so the UI (avatar tooltip,
     // Message Info modal) can show input/output tokens early. Costs are intentionally omitted here -

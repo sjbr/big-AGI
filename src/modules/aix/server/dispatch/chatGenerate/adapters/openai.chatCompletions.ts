@@ -5,7 +5,7 @@ import type { OpenAIDialects } from '~/modules/llms/server/openai/openai.access'
 import { AixAPI_Model, AixAPIChatGenerate_Request, AixMessages_ChatMessage, AixMessages_SystemMessage, AixParts_DocPart, AixParts_InlineAudioPart, AixParts_MetaInReferenceToPart, AixTools_ToolDefinition, AixTools_ToolsPolicy } from '../../../api/aix.wiretypes';
 import { OpenAIWire_API_Chat_Completions, OpenAIWire_ContentParts, OpenAIWire_Messages } from '../../wiretypes/openai.wiretypes';
 
-import { AIX_MISSING_TOOL_RESULT_TEXT, aixSpillShallFlush, aixSpillSystemToUser, approxDocPart_To_String, approxMediaUrlPart_To_String } from './adapters.common';
+import { AIX_MISSING_TOOL_RESULT_TEXT, aixFnv1aHex, aixSpillShallFlush, aixSpillSystemToUser, approxDocPart_To_String, approxMediaUrlPart_To_String } from './adapters.common';
 
 
 //
@@ -175,8 +175,8 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
 
   // [2026-09-03, OpenAI] processing tier (native and OpenRouter - other compatible hosts do not know it)
   if (model.vndOaiServiceTier && (openAIDialect === 'openai' || openAIDialect === 'openrouter')) {
-    // [2026-09-29] 'ultrafast' is Responses-only: native Chat Completions 400s, OpenRouter silently serves it as 'priority' (2x)
-    if (model.vndOaiServiceTier === 'ultrafast')
+    // [2026-09-29] 'ultrafast' is Responses-only on native Chat Completions (400); OpenRouter serves it
+    if (model.vndOaiServiceTier === 'ultrafast' && openAIDialect === 'openai')
       throw new Error('OpenAI Chat Completions API does not support the Ultrafast service tier (Responses API only)');
     payload.service_tier = model.vndOaiServiceTier;
   }
@@ -327,7 +327,7 @@ export function aixToOpenAIChatCompletions(openAIDialect: OpenAIDialects, model:
   // keeps prompt-cache hits alive: caches don't transfer across providers. The affinity id (conversationId/rayId/...) is
   // hashed to avoid shipping internal ids upstream; a 32-bit collision only means two contexts share affinity, harmless.
   if (openAIDialect === 'openrouter' && orSendStickyClientSessionId && sessionAffinityId)
-    payload.session_id = 'bagi-' + _fnv1aHex(sessionAffinityId);
+    payload.session_id = 'bagi-' + aixFnv1aHex(sessionAffinityId);
 
 
   // [Moonshot] Kimi's $web_search builtin function
@@ -823,10 +823,11 @@ function _toOpenAIMessages(openAIDialect: OpenAIDialects, systemMessage: AixMess
               let toolCallPart;
               switch (invocation.type) {
                 case 'function_call':
-                  toolCallPart = OpenAIWire_ContentParts.PredictedFunctionCall(part.id, invocation.name, invocation.args || '');
+                  toolCallPart = OpenAIWire_ContentParts.PredictedFunctionCall(aixOpenAICallId(part.id), invocation.name, invocation.args || '');
                   break;
                 case 'code_execution':
-                  toolCallPart = OpenAIWire_ContentParts.PredictedFunctionCall(part.id, 'execute_code' /* suboptimal */, invocation.code || '');
+                  // JSON object arguments, as in every adapter: raw code 400s behind OpenRouter on Anthropic ("Input should be an object")
+                  toolCallPart = OpenAIWire_ContentParts.PredictedFunctionCall(aixOpenAICallId(part.id), 'execute_code' /* suboptimal */, JSON.stringify({ code: invocation.code || '' }));
                   break;
                 default:
                   const _exhaustiveCheck: never = invocation;
@@ -852,7 +853,7 @@ function _toOpenAIMessages(openAIDialect: OpenAIDialects, systemMessage: AixMess
             case 'tool_response':
               const toolErrorPrefix = part.error ? (typeof part.error === 'string' ? `[ERROR] ${part.error} - ` : '[ERROR] ') : '';
               if (part.response.type === 'function_call' || part.response.type === 'code_execution')
-                chatMessages.push(OpenAIWire_Messages.ToolMessage(part.id, toolErrorPrefix + part.response.result));
+                chatMessages.push(OpenAIWire_Messages.ToolMessage(aixOpenAICallId(part.id), toolErrorPrefix + part.response.result));
               else
                 throw new Error(`Unsupported tool response type in Model message: ${(part as any).pt}`);
               break;
@@ -924,16 +925,6 @@ function _stampTrailingCacheBreakpoint(chatMessages: TRequestMessages): void {
   console.warn('AIX: OpenAI-dispatch: cache breakpoint with no stampable text part in any preceding message');
 }
 
-/** FNV-1a 32-bit hex digest - tiny, deterministic, edge-safe; used to mint the OpenRouter sticky client session id. */
-function _fnv1aHex(text: string): string {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
-}
-
 /** Enforce the Anthropic 4-breakpoint API limit by un-stamping the earliest (prefix-redundant) breakpoints. */
 function _capTrailingCacheBreakpoints(chatMessages: TRequestMessages, maxBreakpoints: number): void {
   const stampedParts: OpenAIWire_ContentParts.TextContentPart[] = [];
@@ -993,10 +984,10 @@ function _toOpenAIToolChoice(openAIDialect: OpenAIDialects, itp: AixTools_ToolsP
     case 'auto':
       return 'auto';
     case 'any':
-      // [Moonshot, 2026-08-17] 'required' 400s while thinking is on (k2.5/k2.6/k2.7-code, probed); K3, moonshot-v1
+      // [Moonshot, 2026-08-17] 'required' 400s while thinking is on (k2.5/k2.6/k2.7-code, probed); K3
       // and thinking-off requests accept it. Degrade to 'auto' rather than hard-fail.
       if (openAIDialect === 'moonshot' && model.reasoningEffort !== 'none'
-        && !(model.id === 'k3' || model.id.startsWith('kimi-k3') || model.id.startsWith('moonshot-v1')))
+        && !(model.id === 'k3' || model.id.startsWith('kimi-k3')))
         return 'auto';
       // [OpenRouter -> Anthropic, 2026-09-01] Fable/Mythos 5.x reject forced tool use and OR relays the 400 ('tool_choice: type "tool"
       // and "any" are not supported for this model.', probed on claude-fable-5.1; Fable 5 400s with the older wording). Degrade to
@@ -1076,6 +1067,16 @@ export function aixDocPart_to_OpenAITextContent(part: AixParts_DocPart): OpenAIW
 
 export function aixTexts_to_OpenAIInstructionText(texts: string[]): string {
   return texts.join(approxSystemMessageJoiner);
+}
+
+/** Longest tool call or item id OpenAI accepts, on Responses and Chat Completions alike (OpenRouter forwards it); longer 400s (2026-10-06) */
+export const AIX_OPENAI_MAX_ID_LENGTH = 64;
+
+/** A tool call id OpenAI accepts: the stored one when it fits, else a stable short one - a call and its result map to the same.
+ * Only foreign ids are ever rewritten: vendors' own call ids fit (29-53 chars measured on OpenAI, Meta AI, Sakana, xAI, DeepSeek),
+ * so same-vendor replay stays byte-exact. The long ones are xAI code cells (83 chars), replayed to xAI by its own adapter. */
+export function aixOpenAICallId(id: string): string {
+  return id.length > 0 && id.length <= AIX_OPENAI_MAX_ID_LENGTH ? id : 'aix_' + aixFnv1aHex(id);
 }
 
 
