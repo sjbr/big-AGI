@@ -6,7 +6,7 @@ import { Release } from '~/common/app.release';
 import type { ModelDescriptionSchema, OrtVendorLookupResult } from '../../llm.server.types';
 import { formatPubDate, fromManualMapping } from '../../models.mappings';
 import { llmOrtAntLookup_ThinkingVariants } from '../../anthropic/anthropic.models';
-import { llmOrtGemLookup } from '../../gemini/gemini.models';
+import { GEM_IMAGE_AR_NO_EXTREMES, llmOrtGemLookup } from '../../gemini/gemini.models';
 import { llmOrtMoonshotLookup } from './moonshot.models';
 import { llmOrtOaiLookup } from './openai.models';
 import { llmOrtMetaLookup } from './metaai.models';
@@ -35,9 +35,9 @@ const orModelFamilyOrder = [
   // Other major providers
   'mistralai/', 'meta-llama/', 'amazon/', 'cohere/',
   // Specialized/AI companies
-  'perplexity/', 'inclusionai/', 'inception/', 'arcee-ai/', 'thinkingmachines/', 'sakana/', 'upstage/', 'nex-agi/',
+  'perplexity/', 'inclusionai/', 'inception/', 'arcee-ai/', 'thinkingmachines/', 'sakana/', 'upstage/', 'nex-agi/', 'fireworks/',
   // Chinese majors (surfaced on OpenRouter directly)
-  'minimax/', 'bytedance/', 'bytedance-seed/', 'tencent/', 'baidu/', 'stepfun/', 'meituan/', 'kwaipilot/',
+  'minimax/', 'bytedance/', 'bytedance-seed/', 'tencent/', 'stepfun/', 'meituan/',
   // Research/open models
   'nvidia/', 'microsoft/', 'nousresearch/', 'ibm-granite/', 'poolside/', 'xiaomi/',
 ] as const;
@@ -329,7 +329,10 @@ export function openRouterModelToModelDescription(wireModel: object): ModelDescr
       // would be a mislabel (no brain icon, but it reasons and bills for it): drop the spec so those models ship
       // as ONE always-thinking entry, matching their native defs. Revisit if the adapter learns to send an
       // explicit reasoning.enabled=false for the base variant - that would give Sonnet 5 a real non-thinking twin.
-      if (model.reasoning?.mandatory || model.reasoning?.default_enabled) {
+      // [2026-10-07] Haiku 5.5 also thinks by default through OR (probed: 48 reasoning tokens with no field), but OR lists it
+      // without `default_enabled`: a native visible Thinking switch (initialValue -1) carries the same fact, so trust it too.
+      const isNativeThinkingOnByDefault = !!antLookup?.parameterSpecs?.some(p => p.paramId === 'llmVndAntThinkingBudget' && p.initialValue === -1 && !p.hidden);
+      if (model.reasoning?.mandatory || model.reasoning?.default_enabled || isNativeThinkingOnByDefault) {
         const budgetIndex = parameterSpecs.findIndex(p => p.paramId === 'llmVndAntThinkingBudget');
         if (budgetIndex !== -1)
           parameterSpecs.splice(budgetIndex, 1);
@@ -355,7 +358,7 @@ export function openRouterModelToModelDescription(wireModel: object): ModelDescr
       // 0-day: Gemini image generation params
       if (interfaces.includes(LLM_IF_Outputs_Image) && !parameterSpecs.some(p => p.paramId === 'llmVndGeminiAspectRatio' || p.paramId === 'llmVndGeminiImageSize')) {
         DEV_DEBUG_OPENROUTER_MODELS && console.log(`[DEV] openRouterModelToModelDescription: tagging ${gemLookup ? 'KNOWN' : 'unknown'} Gemini image output model:`, model.id);
-        parameterSpecs.push({ paramId: 'llmVndGeminiAspectRatio' });
+        parameterSpecs.push({ paramId: 'llmVndGeminiAspectRatio', enumValues: GEM_IMAGE_AR_NO_EXTREMES }); // unknown model: only the ratios every Gemini image model takes
         // NOTE: temporarily disable the size, as the returned data is a > 16MB pic which will cause issues
         // to the Zod parser, with "Maximum call stack size exceeded"
         // parameterSpecs.push({ paramId: 'llmVndGeminiImageSize' });

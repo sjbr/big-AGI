@@ -34,6 +34,7 @@ import { clipboardCopyDOMSelectionOrFallback, copyToClipboard } from '~/common/u
 import { createTextContentFragment, DMessageFragment, DMessageFragmentId, updateFragmentWithEditedText } from '~/common/stores/chat/chat.fragments';
 import { useFragmentBuckets } from '~/common/stores/chat/hooks/useFragmentBuckets';
 import { useUIPreferencesStore } from '~/common/stores/store-ui';
+import { useUXLabsStore } from '~/common/stores/store-ux-labs';
 
 import { BlockOpContinue } from './BlockOpContinue';
 import { BlockOpOptions, optionsExtractFromFragments_dangerModifyFragment } from './BlockOpOptions';
@@ -42,6 +43,7 @@ import { BlockOpUpstreamResume } from './BlockOpUpstreamResume';
 import { ChatMessageEditAttachments, type EditModeAttachmentsHandle } from './ChatMessageEditAttachments';
 import { ChatMessageInfoPopup } from './ChatMessageInfoPopup';
 import { ChatMessageMenu } from './ChatMessageMenu';
+import { ChatMessageTimestamp } from './ChatMessageTimestamp';
 import { ContentFragments } from './fragments-content/ContentFragments';
 import { DocumentAttachmentFragments } from './fragments-attachment-doc/DocumentAttachmentFragments';
 import { ImageAttachmentFragments } from './fragments-attachment-image/ImageAttachmentFragments';
@@ -328,6 +330,7 @@ export function ChatMessage(props: {
   isSpeaking?: boolean,
   hideAvatar?: boolean,
   blocksStretch?: boolean, // overrides 'messageFullWidth'
+  showTimestamp?: boolean,
   showAntPromptCaching?: boolean,
   showBlocksDate?: boolean,
   htmlRenderVariant?: AutoBlocksHtmlRenderVariant,
@@ -361,6 +364,7 @@ export function ChatMessage(props: {
   const [opsMenuAnchor, setOpsMenuAnchor] = React.useState<HTMLElement | null>(null);
   const [textContentEditState, setTextContentEditState] = React.useState<ChatMessageTextPartEditState | null>(null);
   const [showInfoModal, setShowInfoModal] = React.useState(false);
+  const [userMarkdownFlipped, setUserMarkdownFlipped] = React.useState(false); // 'View as text/markdown', this message only, not saved
   const attachmentsEditRef = React.useRef<EditModeAttachmentsHandle>(null);
 
   // latest-message ref: lets stable callbacks read the current message without putting it in deps
@@ -375,6 +379,7 @@ export function ChatMessage(props: {
     messageFullWidth: state.messageFullWidth,
     uiComplexityMode: state.complexityMode,
   })));
+  const labsUserMarkdown = useUXLabsStore(state => state.labsUserMarkdown);
 
 
   // derived state
@@ -393,6 +398,7 @@ export function ChatMessage(props: {
   const fromAssistant = messageRole === 'assistant';
   const fromSystem = messageRole === 'system';
   const fromUser = messageRole === 'user';
+  const userMarkdown = labsUserMarkdown !== userMarkdownFlipped;
   const messageHasBeenEdited = !!messageUpdated;
   const msgGenOutOfTokens = messageWasOutOfTokens(messageGenerator);
 
@@ -703,6 +709,12 @@ export function ChatMessage(props: {
     e.preventDefault();
     handleOpsMenuClose();
   }, [handleOpsMenuClose, handleEditsBegin, handleEditsCancel, isEditingText, messagePendingIncomplete]);
+
+  const handleOpsMessageViewToggle = React.useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setUserMarkdownFlipped(flipped => !flipped);
+    handleOpsMenuClose();
+  }, [handleOpsMenuClose]);
 
   const handleOpsMessageTruncate = React.useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -1020,7 +1032,7 @@ export function ChatMessage(props: {
             messageGeneratorLlmId={messageGenerator?.mgt === 'aix' ? messageGenerator.aix?.mId : undefined}
             messagePendingIncomplete={messagePendingIncomplete}
             inFluxFragmentId={inFluxFragmentId}
-            disableMarkdownText={disableMarkdown || fromUser /* User messages are edited as text. Try to have them in plain text. NOTE: This may bite. */}
+            disableMarkdownText={disableMarkdown || (fromUser && !userMarkdown) /* user messages: plain text, unless Labs or this message's menu says markdown */}
             htmlRenderVariant={props.htmlRenderVariant}
 
             textEditsState={textContentEditState}
@@ -1109,6 +1121,10 @@ export function ChatMessage(props: {
             />
           )}
 
+          {props.showTimestamp && !zenMode && !isEditingText && (
+            <ChatMessageTimestamp message={props.message} onShowInfo={handleOpsShowInfo} />
+          )}
+
           {/* Char & Word count */}
           {/*{!zenMode && !isEditingText && !messagePendingIncomplete && fragmentFlattenedText.length > 0 && (*/}
           {/*  <Typography level='body-xs' sx={{ mx: 1.5, mt: 0.5, textAlign: fromAssistant ? 'left' : 'right', opacity: 0.5 }}>*/}
@@ -1171,6 +1187,7 @@ export function ChatMessage(props: {
           isUserNotifyComplete={isUserNotifyComplete}
           userNotifyCompleteLlmId={(messageGenerator?.mgt === 'aix' ? messageGenerator.aix?.mId : undefined) ?? null}
           isUserStarred={isUserStarred}
+          isViewMarkdown={userMarkdown}
           isVndAndCacheAuto={isVndAndCacheAuto}
           isVndAndCacheUser={isVndAndCacheUser}
           showVndAntCaching={uiComplexityMode === 'extra' && !!props.showAntPromptCaching && !isUserMessageSkipped}
@@ -1183,6 +1200,7 @@ export function ChatMessage(props: {
           onOpsMessageCopySrc={handleOpsMessageCopySrc}
           onOpsMessageEditToggle={!onMessageFragmentReplace ? undefined : handleOpsMessageEditToggle}
           onOpsMessageTruncate={!onMessageTruncate ? undefined : handleOpsMessageTruncate}
+          onOpsMessageViewToggle={!fromUser ? undefined : handleOpsMessageViewToggle}
           onOpsShowInfo={handleOpsShowInfo}
           onOpsTextDiagram={!onTextDiagram ? undefined : handleOpsTextDiagram}
           onOpsTextImagine={!onTextImagine ? undefined : handleOpsTextImagine}
