@@ -15,6 +15,7 @@ import type { DMessageRole } from '~/common/stores/chat/chat.message';
 import type { LiveFileId } from '~/common/livefile/liveFile.types';
 import { attachmentFragmentDocRename, attachmentFragmentDocTitle, DMessageAttachmentFragment, DMessageFragmentId, DVMimeType, isDocPart, updateFragmentWithEditedText } from '~/common/stores/chat/chat.fragments';
 import { InlineTextarea } from '~/common/components/InlineTextarea';
+import { useArmedConfirm } from '~/common/components/useArmedConfirm';
 import { useContextWorkspaceId } from '~/common/stores/workspace/WorkspaceIdProvider';
 import { useScrollToBottom } from '~/common/scroll-to-bottom/useScrollToBottom';
 
@@ -53,7 +54,7 @@ function _inferInitialViewAsCode(attachmentFragment: DMessageAttachmentFragment)
 }
 
 
-export const DocAttachmentFragmentPane = React.memo(function DocAttachmentFragment(props: {
+export const DocAttachmentFragmentPane = React.memo(function DocAttachmentFragmentPane(props: {
   fragment: DMessageAttachmentFragment,
   controlledEditor: boolean,
   editedText?: string,
@@ -61,14 +62,12 @@ export const DocAttachmentFragmentPane = React.memo(function DocAttachmentFragme
   messageRole: DMessageRole,
   contentScaling: ContentScaling,
   isMobile: boolean,
-  zenMode: boolean,
   disableMarkdownText: boolean,
   onFragmentDelete?: (fragmentId: DMessageFragmentId) => void,
   onFragmentReplace?: (fragmentId: DMessageFragmentId, newContent: DMessageAttachmentFragment) => void,
 }) {
 
   // state
-  const [isDeleteArmed, setIsDeleteArmed] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(false);
   const [isEditingTitle, setIsEditingTitle] = React.useState(false);
   const [viewAsCode, setViewAsCode] = React.useState(() => _inferInitialViewAsCode(props.fragment));
@@ -153,23 +152,13 @@ export const DocAttachmentFragmentPane = React.memo(function DocAttachmentFragme
     onFragmentDelete?.(fragmentId);
   }, [fragmentId, onFragmentDelete]);
 
-  const handleToggleDeleteArmed = React.useCallback((event: React.MouseEvent) => {
-    // reset other states when entering Delete
-    if (!isDeleteArmed) {
-      // setIsLiveFileArmed(false);
-      // setIsEditing(false);
-    }
-    if (!isDeleteArmed && event.shiftKey) // immadiately delete:fragment
-      handleFragmentDelete();
-    else
-      setIsDeleteArmed(on => !on);
-  }, [handleFragmentDelete, isDeleteArmed]);
+  const { armed: isDeleteArmed, toggle: handleToggleDeleteArmed, confirm: handleDeleteConfirm, disarm: disarmDelete } = useArmedConfirm(handleFragmentDelete);
 
 
   // edit
 
   const handleEditApply = React.useCallback(() => {
-    setIsDeleteArmed(false);
+    disarmDelete();
 
     if (props.controlledEditor) {
       setIsEditing(false);
@@ -188,19 +177,19 @@ export const DocAttachmentFragmentPane = React.memo(function DocAttachmentFragme
       // if the user deleted all text, let's remove the part
       handleFragmentDelete();
     }
-  }, [editedText, handleFragmentDelete, handleReplaceDocFragmentText, onFragmentDelete, props.controlledEditor]);
+  }, [disarmDelete, editedText, handleFragmentDelete, handleReplaceDocFragmentText, onFragmentDelete, props.controlledEditor]);
 
   const handleToggleEdit = React.useCallback(() => {
     // reset other states when entering Edit
     if (!isEditing) {
       setIsEditingTitle(false); // cancel title edit
-      setIsDeleteArmed(false);
+      disarmDelete();
       // setIsLiveFileArmed(false);
       // resetLiveFileState();
       skipNextAutoScroll();
     }
     setIsEditing(on => !on);
-  }, [isEditing, skipNextAutoScroll]);
+  }, [disarmDelete, isEditing, skipNextAutoScroll]);
 
 
   // replace fragment with the blocks text - e.g. clicking on a checkbox
@@ -328,7 +317,7 @@ export const DocAttachmentFragmentPane = React.memo(function DocAttachmentFragme
               variant='solid'
               color='danger'
               size='sm'
-              onClick={handleFragmentDelete}
+              onClick={handleDeleteConfirm}
               startDecorator={<DeleteForeverIcon />}
             >
               Delete
@@ -359,13 +348,13 @@ export const DocAttachmentFragmentPane = React.memo(function DocAttachmentFragme
               startDecorator={showDeleteInstead ? <DeleteForeverIcon /> : props.controlledEditor ? undefined : <CheckRoundedIcon />}
               sx={_styles.button}
             >
-              {!showDeleteInstead ? 'Save' : 'Delete'}
+              {!showDeleteInstead ? (props.controlledEditor ? 'Ok' : 'Save') : 'Delete'}
             </Button>
           )}
         </Box>
       )}
     </Box>
-  ), [handleEditApply, handleFragmentDelete, handleToggleDeleteArmed, handleToggleEdit, isDeleteArmed, isEditing, onFragmentDelete, onFragmentReplace, props.controlledEditor, reverseToolbar, showDeleteInstead]);
+  ), [handleDeleteConfirm, handleEditApply, handleToggleDeleteArmed, handleToggleEdit, isDeleteArmed, isEditing, onFragmentDelete, onFragmentReplace, props.controlledEditor, reverseToolbar, showDeleteInstead]);
 
 
   return (

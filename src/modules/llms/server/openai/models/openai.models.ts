@@ -170,10 +170,10 @@ const OAI_PRICE_TOOLS: NonNullable<ModelDescriptionSchema['chatPrice']>['tools']
 
 export const _knownOpenAIChatModels = llmsDefineModels<_OpenAIModelDef>()([
 
-  /// GPT-6 series - Astra released September 3, 2026; Sol and Luna September 22, 2026; 6.1 Sol September 29, 2026 (DevDay)
-  // Tiers: Astra (flagship) > Sol > Luna, no Terra. Tier names carry no fixed rank across generations: Sol was the GPT-5.6
+  /// GPT-6 series - Astra September 3, 2026; Sol/Luna September 22; 6.1 Sol September 29; 6.1 Terra October 26
+  // Tiers: Astra (flagship) > Sol > Terra (6.1) > Luna. Tier names carry no fixed rank across generations: Sol was the GPT-5.6
   // flagship, here it is the middle tier. Ids are the stable pointers (no dated snapshots; bare 'gpt-6' and 'gpt-6-terra' 404).
-  // Reasoning items replay across the three tiers but not across generations: the API silently omits another family's items.
+  // Reasoning items replay within a family but not across generations: the API silently omits another family's items.
   // Astra (API-verified at launch: parameter sweep + raw probes):
   // - 1,050,000 context (922,000 max input) / 128,000 max output / knowledge cutoff Apr 30, 2026; text+image in (vision verified), text out
   // - reasoning.effort: low|medium|high|xhigh|max (default medium) - 'none' and 'minimal' 400, so no No-thinking variant; reasoning.mode 'pro' works
@@ -199,10 +199,12 @@ export const _knownOpenAIChatModels = llmsDefineModels<_OpenAIModelDef>()([
   // 6.1 Sol (API-verified 2026-09-29): Astra's contract at Sol prices - effort low..max ('none' and 'minimal' 400, so no temperature
   // at any effort), cached input 5% of input (vs 10% on 6 Sol), cutoff Apr 30, 2026; Chat Completions effort low..xhigh, function
   // tools 400 at every effort. Same reasoning family: items replay both ways with Astra and 6 Sol; 5.6 items are silently omitted.
+  // 6.1 Terra: effort none..max, temperature 0..2 at 'none', Pro mode, verbosity and function roundtrips verified 2026-10-26.
+  // Streaming, code interpreter and Flex/Fast work; Ultrafast fails inside the stream. Cache reads cost 5% of input.
   // Multi-agent (beta header `responses_multi_agent=v1`, also on GPT-5.6) - not adopted. GPT-6.1 Astra was pulled before launch.
   // Shipped with GPT-6, accepted on every tier but not adopted: async tool calling (`async: true` on tools; the function_call item
   // echoes `async: true` and the model answers before the result), `configuration_update` input items (change effort mid-conversation,
-  // cache prefix intact), `prompt_cache_options.ttl: '30m'` (echoed as mode 'implicit' beside prompt_cache_retention '24h').
+  // cache prefix intact), `prompt_cache_options.ttl` '30m' or '12h' (2026-10-20, 2.5x write; AIX omits it, so writes bill at the 30m 1.25x).
   // Not probed: mid-turn steering over WebSockets, asynchronous misalignment monitoring (can stop a conversation for review).
 
   // GPT-6 Astra - flagship
@@ -256,6 +258,34 @@ export const _knownOpenAIChatModels = llmsDefineModels<_OpenAIModelDef>()([
       input: [{ upTo: 272000, price: 2 }, { upTo: null, price: 4 }],
       output: [{ upTo: 272000, price: 10 }, { upTo: null, price: 15 }],
       cache: { read: [{ upTo: 272000, price: 0.1 }, { upTo: null, price: 0.2 }], write: [{ upTo: 272000, price: 2.5 }, { upTo: null, price: 5 }] },
+      tools: OAI_PRICE_TOOLS,
+    },
+    // benchmark: no arena data yet
+  },
+
+  // GPT-6.1 Terra - https://developers.openai.com/api/docs/models/gpt-6.1-terra
+  {
+    idPrefix: 'gpt-6.1-terra',
+    label: 'GPT-6.1 Terra',
+    pubDate: '20261026',
+    description: 'Fast visual reasoning, computer use, and writing at half the price of GPT-6.1 Sol. Reasoning can be turned off. 1M token context.',
+    contextWindow: 1050000,
+    maxCompletionTokens: 128000,
+    interfaces: [LLM_IF_OAI_Responses, ...IFS_CHAT_CACHE_REASON, LLM_IF_HOTFIX_NoTemperature],
+    parameterSpecs: [
+      { paramId: 'llmVndOaiEffort', enumValues: ['none', 'low', 'medium', 'high', 'xhigh', 'max'], initialValue: 'medium' },
+      { paramId: 'llmVndOaiServiceTier', enumValues: ['flex', 'fast'] },
+      { paramId: 'llmVndOaiReasoningMode' },
+      { paramId: 'llmVndOaiWebSearchContext' },
+      { paramId: 'llmVndOaiVerbosity' },
+      { paramId: 'llmVndOaiImageGeneration' },
+      { paramId: 'llmVndOaiCodeInterpreter' },
+      { paramId: 'llmForceNoStream' },
+    ],
+    chatPrice: {
+      input: [{ upTo: 272000, price: 1 }, { upTo: null, price: 2 }],
+      output: [{ upTo: 272000, price: 5 }, { upTo: null, price: 7.5 }],
+      cache: { read: [{ upTo: 272000, price: 0.05 }, { upTo: null, price: 0.1 }], write: [{ upTo: 272000, price: 1.25 }, { upTo: null, price: 2.5 }] },
       tools: OAI_PRICE_TOOLS,
     },
     // benchmark: no arena data yet
@@ -1092,10 +1122,12 @@ export const _knownOpenAIChatModels = llmsDefineModels<_OpenAIModelDef>()([
 
   // GPT-4.1
   {
+    hidden: true, // deprecated Oct 14, 2026, shutdown 2027-01-14
     idPrefix: 'gpt-4.1-2025-04-14',
-    label: 'GPT-4.1',
+    label: 'GPT-4.1 [Deprecated]',
     pubDate: '20250414',
-    description: 'Flagship GPT model for complex tasks. Major improvements on coding, instruction following, and long context with 1M token context window.',
+    isLegacy: true,
+    description: '[Use: GPT-6 Luna - Shut down: 2027-01-14] Flagship GPT model for complex tasks. Major improvements on coding, instruction following, and long context with 1M token context window.',
     contextWindow: 1047576,
     maxCompletionTokens: 32768,
     interfaces: IFS_CHAT_CACHE,
@@ -1110,10 +1142,12 @@ export const _knownOpenAIChatModels = llmsDefineModels<_OpenAIModelDef>()([
 
   // GPT-4.1 mini
   {
+    hidden: true, // deprecated Oct 14, 2026, shutdown 2027-01-14
     idPrefix: 'gpt-4.1-mini-2025-04-14',
-    label: 'GPT-4.1 Mini',
+    label: 'GPT-4.1 Mini [Deprecated]',
     pubDate: '20250414',
-    description: 'Balanced for intelligence, speed, and cost. Matches or exceeds GPT-4o in intelligence while reducing latency by nearly half and cost by 83%.',
+    isLegacy: true,
+    description: '[Use: GPT-6 Luna - Shut down: 2027-01-14] Balanced for intelligence, speed, and cost. Matches or exceeds GPT-4o in intelligence while reducing latency by nearly half and cost by 83%.',
     contextWindow: 1047576,
     maxCompletionTokens: 32768,
     interfaces: IFS_CHAT_CACHE,
@@ -1207,10 +1241,12 @@ export const _knownOpenAIChatModels = llmsDefineModels<_OpenAIModelDef>()([
 
   // GPT-4o
   {
+    hidden: true, // deprecated Oct 14, 2026, shutdown 2027-01-14
     idPrefix: 'gpt-4o-2024-11-20',
-    label: 'GPT-4o',
+    label: 'GPT-4o [Deprecated]',
     pubDate: '20241120',
-    description: 'Snapshot of gpt-4o from November 20th, 2024.',
+    isLegacy: true,
+    description: '[Use: GPT-6 Luna - Shut down: 2027-01-14] Snapshot of gpt-4o from November 20th, 2024.',
     contextWindow: 128000,
     maxCompletionTokens: 16384,
     interfaces: IFS_CHAT_CACHE,
@@ -1219,10 +1255,11 @@ export const _knownOpenAIChatModels = llmsDefineModels<_OpenAIModelDef>()([
   },
   {
     idPrefix: 'gpt-4o-2024-08-06',
-    label: 'GPT-4o',
+    label: 'GPT-4o [Deprecated]',
     pubDate: '20240806',
-    hidden: true, // previous version
-    description: 'Snapshot that supports Structured Outputs. gpt-4o currently points to this version.',
+    hidden: true, // deprecated Oct 14, 2026, shutdown 2027-01-14
+    isLegacy: true,
+    description: '[Use: GPT-6 Luna - Shut down: 2027-01-14] Snapshot that supports Structured Outputs. gpt-4o currently points to this version.',
     contextWindow: 128000,
     maxCompletionTokens: 16384,
     interfaces: IFS_CHAT_CACHE,
@@ -1255,10 +1292,12 @@ export const _knownOpenAIChatModels = llmsDefineModels<_OpenAIModelDef>()([
 
   // GPT-4o mini
   {
+    hidden: true, // deprecated Oct 14, 2026, shutdown 2027-01-14
     idPrefix: 'gpt-4o-mini-2024-07-18',
-    label: 'GPT-4o Mini',
+    label: 'GPT-4o Mini [Deprecated]',
     pubDate: '20240718',
-    description: 'Affordable model for fast, lightweight tasks. GPT-4o Mini is cheaper and more capable than GPT-3.5 Turbo.',
+    isLegacy: true,
+    description: '[Use: GPT-6 Luna - Shut down: 2027-01-14] Affordable model for fast, lightweight tasks. GPT-4o Mini is cheaper and more capable than GPT-3.5 Turbo.',
     contextWindow: 128000,
     maxCompletionTokens: 16384,
     interfaces: IFS_CHAT_CACHE,
@@ -1440,8 +1479,10 @@ const openAIModelsDenyList: string[] = [
   'sora-2-pro', 'sora-2',
 
   // Specialized domain models - cybersecurity, gated behind the Daybreak program ('does not exist or you do not have access', probed 2026-08-17)
-  'gpt-5.4-cyber', 'gpt-5.5-cyber', 'gpt-5.6-cyber',
-  'daybreak-blue-latest', 'daybreak-red-latest', // program aliases -> gpt-5.6-sol / gpt-5.6-cyber
+  'gpt-5.4-cyber' /* shut down 2026-10-01 */, 'gpt-5.5-cyber', 'gpt-5.6-cyber',
+  'daybreak-blue-latest', 'daybreak-red-latest', // deprecated 'gpt-daybreak-*' program aliases -> gpt-5.6-sol / gpt-5.6-cyber
+  // Specialized domain models - life sciences, gated behind the GPT-Rosalind trusted-access program (probed 2026-10-21)
+  'gpt-rosalind-research', 'gpt-rosalind-discovery',
 
   // Safety/moderation models
   'gpt-oss-safeguard',
@@ -1507,6 +1548,7 @@ const _manualOrderingIdPrefixes = [
   // GPT-6
   'gpt-6-astra',
   'gpt-6.1-sol',
+  'gpt-6.1-terra',
   'gpt-6-sol',
   'gpt-6-luna',
   'gpt-6.1-',

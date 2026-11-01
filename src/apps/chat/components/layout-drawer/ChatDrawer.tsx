@@ -15,7 +15,6 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import StarOutlineRoundedIcon from '@mui/icons-material/StarOutlineRounded';
 
 import type { DConversationId } from '~/common/stores/chat/chat.conversation';
-import { DFolder, useFolderStore } from '~/common/stores/folders/store-chat-folders';
 import { DebouncedInputMemo } from '~/common/components/DebouncedInput';
 import { FolderChangeRequest, FoldersSelectPopup } from '~/common/components/folders/FoldersSelectPopup';
 import { FoldersToggleOff } from '~/common/components/icons/FoldersToggleOff';
@@ -27,6 +26,7 @@ import { capitalizeFirstLetter } from '~/common/util/textUtils';
 import { getIsMobile } from '~/common/components/useMatchMedia';
 import { optimaCloseDrawer } from '~/common/layout/optima/useOptima';
 import { themeScalingMap, themeZIndexOverMobileDrawer } from '~/common/app.theme';
+import { useChatFolderActive } from '~/common/stores/folders/hooks/useChatFolderActive';
 import { useUIPreferencesStore } from '~/common/stores/store-ui';
 
 import { ChatDrawerItemMemo } from './ChatDrawerItem';
@@ -35,9 +35,6 @@ import { ChatFolderList } from './folders/ChatFolderList';
 import { ChatNavGrouping, ChatSearchDepth, ChatSearchSorting, isDrawerSearching, useChatDrawerRenderItems } from './useChatDrawerRenderItems';
 import { useChatDrawerFilters } from '../../store-app-chat';
 
-
-// this is here to make shallow comparisons work on the next hook
-const noFolders: DFolder[] = [];
 
 // 'Older than' age filter presets (days of last activity; null = off)
 const AGE_FILTER_OPTIONS: { days: number | null, label: string, shortLabel: string }[] = [
@@ -48,28 +45,11 @@ const AGE_FILTER_OPTIONS: { days: number | null, label: string, shortLabel: stri
   { days: 90, label: 'Older than 3 months', shortLabel: '>3m' },
 ];
 
-/*
- * Lists folders and returns the active folder
- */
-export const useFolders = (activeFolderId: string | null) => useFolderStore(useShallow(({ enableFolders, folders, toggleEnableFolders }) => {
-
-  // finds the active folder if any
-  const activeFolder = (enableFolders && activeFolderId)
-    ? folders.find(folder => folder.id === activeFolderId) ?? null
-    : null;
-
-  return {
-    activeFolder,
-    allFolders: enableFolders ? folders : noFolders,
-    enableFolders,
-    toggleEnableFolders,
-  };
-}));
-
 
 export const ChatDrawerMemo = React.memo(ChatDrawer);
 
 function ChatDrawer(props: {
+  isMobile: boolean,
   activeConversationId: DConversationId | null,
   activeFolderId: string | null,
   chatPanesConversationIds: DConversationId[],
@@ -89,6 +69,7 @@ function ChatDrawer(props: {
   const [navGrouping, setNavGrouping] = React.useState<ChatNavGrouping>('date');
   const [searchSorting, setSearchSorting] = React.useState<ChatSearchSorting>('date');
   const [searchDepth, setSearchDepth] = React.useState<ChatSearchDepth>('attachments'); // default: full search
+  const [searchInArchived, setSearchInArchived] = React.useState(false);
   const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState('');
   const [folderChangeRequest, setFolderChangeRequest] = React.useState<FolderChangeRequest | null>(null);
   const [renderLimit, setRenderLimit] = React.useState(200); // progressive loading limit
@@ -105,9 +86,9 @@ function ChatDrawer(props: {
     showPersonaIcons, toggleShowPersonaIcons,
     showRelativeSize, toggleShowRelativeSize,
   } = useChatDrawerFilters();
-  const { activeFolder, allFolders, enableFolders, toggleEnableFolders } = useFolders(props.activeFolderId);
+  const { activeFolder, allFolders, enableFolders, toggleEnableFolders } = useChatFolderActive(props.activeFolderId);
   const { filteredChatsCount, filteredChatIDs, filteredChatsAreEmpty, filteredChatsBarBasis, filteredChatsIncludeActive, renderNavItems } = useChatDrawerRenderItems(
-    props.activeConversationId, props.chatPanesConversationIds, debouncedSearchQuery, activeFolder, allFolders, filterHasBeamOpen, filterHasStars, filterHasImageAssets, filterHasDocFragments, filterIsArchived, filterOlderThanDays, navGrouping, searchSorting, showRelativeSize, searchDepth,
+    props.activeConversationId, props.chatPanesConversationIds, debouncedSearchQuery, activeFolder, allFolders, filterHasBeamOpen, filterHasStars, filterHasImageAssets, filterHasDocFragments, filterIsArchived, filterOlderThanDays, navGrouping, searchSorting, showRelativeSize, searchDepth, searchInArchived,
   );
   const [uiComplexityMode, contentScaling] = useUIPreferencesStore(useShallow((state) => [state.complexityMode, state.contentScaling]));
   const zenMode = uiComplexityMode === 'minimal';
@@ -297,11 +278,15 @@ function ChatDrawer(props: {
             <ListItemDecorator>{searchDepth === 'attachments' && <CheckRoundedIcon />}</ListItemDecorator>
             Full
           </MenuItem>
+          <MenuItem selected={searchInArchived} onClick={() => setSearchInArchived(!searchInArchived)}>
+            <ListItemDecorator>{searchInArchived && <CheckRoundedIcon />}</ListItemDecorator>
+            Include Archived
+          </MenuItem>
         </Menu>
       )}
     </Dropdown>
   ), [
-    filterHasDocFragments, filterHasImageAssets, filterHasStars, isSearching, navGrouping, searchSorting, searchDepth, filterIsArchived, showPersonaIcons, showRelativeSize, filterOlderThanDays,
+    filterHasDocFragments, filterHasImageAssets, filterHasStars, isSearching, navGrouping, searchSorting, searchDepth, searchInArchived, filterIsArchived, showPersonaIcons, showRelativeSize, filterOlderThanDays,
     toggleFilterHasDocFragments, toggleFilterHasImageAssets, toggleFilterHasStars, toggleFilterIsArchived, toggleShowPersonaIcons, toggleShowRelativeSize, setFilterOlderThanDays,
   ]);
 
@@ -353,6 +338,7 @@ function ChatDrawer(props: {
     {/*}}>*/}
     {enableFolders && (
       <ChatFolderList
+        isMobile={props.isMobile}
         folders={allFolders}
         // folderChatCounts={folderChatCounts}
         contentScaling={contentScaling}
@@ -361,7 +347,7 @@ function ChatDrawer(props: {
         sx={{
           // shrink this at twice the rate as the Titles list
           flexGrow: 0, flexShrink: 2, overflow: 'hidden',
-          minHeight: '7.5rem',
+          // minHeight: '7.5rem', // DISABLED: let it collapse fully, we have a Zero State message
           p: 2,
           backgroundColor: 'background.level1',
         }}

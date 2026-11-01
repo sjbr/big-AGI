@@ -18,6 +18,7 @@ import { BlocksContainer } from '~/modules/blocks/BlocksContainers';
 import { TooltipOutlined } from '~/common/components/TooltipOutlined';
 import { RenderCodeMemo } from '~/modules/blocks/code/RenderCode';
 import { ScaledTextBlockRenderer } from '~/modules/blocks/ScaledTextBlockRenderer';
+import { useVertexLinksForDisplay } from '~/modules/google/useVertexLinksForDisplay';
 
 import type { DMessageFragmentId, DVoidPlaceholderMOp, DVoidPlaceholderPart } from '~/common/stores/chat/chat.fragments';
 import { DataStreamViz } from '~/common/components/DataStreamViz';
@@ -381,7 +382,7 @@ function ModelOperationChip(props: {
   const [elapsedSeconds, setElapsedSeconds] = React.useState(0);
 
   // derived
-  const { mot, cts, text, state, iTexts, oTexts } = props.op;
+  const { mot, cts, text, state, iTexts, oTexts } = useVertexLinksForDisplay(props.op);
   const { Icon, color } = modelOperationConfig[mot] ?? {};
   const isDone = state === 'done';
   const isError = state === 'error';
@@ -417,6 +418,9 @@ function ModelOperationChip(props: {
     fontSize: themeScalingMap[props.contentScaling]?.blockFontSize ?? undefined,
   }), [isFinished, isError, hasDetails, props.contentScaling]);
 
+  // stable sx, so RenderCodeMemo holds across the chip's own re-renders
+  const inputCodeSx: SxProps = React.useMemo(() => ({ m: -1.5, fontSize: props.contentScaling }), [props.contentScaling]);
+
   const chipElement = (
     <Chip
       size='sm'
@@ -448,7 +452,7 @@ function ModelOperationChip(props: {
             title=''
             isPartial={false}
             renderHideTitle={true}
-            sx={{ m: -1.5, fontSize: props.contentScaling }}
+            sx={inputCodeSx}
           />
         ) : iText}
 

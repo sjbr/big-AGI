@@ -24,6 +24,7 @@ import { useModuleBeamStore } from './store-module-beam';
 
 export function BeamView(props: {
   beamStore: BeamStoreApi,
+  isFocused: boolean,
   isMobile: boolean,
   showExplainer?: boolean,
   // sx?: SxProps,
@@ -39,7 +40,7 @@ export function BeamView(props: {
     gatherAutoStartAfterScatter: state.gatherAutoStartAfterScatter,
   })));
   const {
-    /* root */ inputHistoryReplaceMessageFragment,
+    /* root */ inputHistoryReplaceMessageFragments,
     /* scatter */ setRayCount, startScatteringAll, stopScatteringAll,
   } = props.beamStore.getState();
   const {
@@ -126,10 +127,10 @@ export function BeamView(props: {
 
 
   // intercept ctrl+enter and esc
-  useGlobalShortcuts('BeamView', React.useMemo(() => [
+  useGlobalShortcuts('BeamView', React.useMemo(() => !props.isFocused ? [] : [
     { key: ShortcutKey.Enter, ctrl: true, action: () => handleScatterStart(false), disabled: isScattering, level: 1 },
     ...(isScattering ? [{ key: ShortcutKey.Esc, action: handleScatterStop, level: 10 + 1 /* becasuse > ChatBarAltBeam */ }] : []),
-  ], [handleScatterStart, handleScatterStop, isScattering]));
+  ], [handleScatterStart, handleScatterStop, isScattering, props.isFocused]));
 
 
   // Explainer, if unseen
@@ -165,7 +166,7 @@ export function BeamView(props: {
       <BeamScatterInput
         isMobile={props.isMobile}
         history={inputHistory}
-        onMessageFragmentReplace={inputHistoryReplaceMessageFragment}
+        onMessageFragmentsReplace={inputHistoryReplaceMessageFragments}
       />
 
       {/* Scatter Controls */}

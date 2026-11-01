@@ -8,6 +8,8 @@ import type { LlmsXAIModelId } from '~/modules/llms/server/openai/models/xai.mod
 import type { LlmsZAIModelId } from '~/modules/llms/server/openai/models/zai.models';
 import type { ModelVendorId } from '~/modules/llms/vendors/vendors.registry';
 
+import { textEqualsDotDashInsensitive } from '~/common/util/textUtils';
+
 import type { DLLM, DLLMId } from './llms.types';
 import type { DModelDomainId } from './model.domains.types';
 import { getLLMPubDate, isLLMHidden, LLM_IF_Inputs_Video } from './llms.types';
@@ -94,7 +96,7 @@ export const EditorialDefaults = {
     { vendor: 'openrouter', modelId: 'openai/gpt-5.6-sol' },
     { vendor: 'openai',     modelId: 'gpt-5.5' },
     { vendor: 'openrouter', modelId: 'openai/gpt-5.5' },
-    { vendor: 'googleai',   modelId: 'models/gemini-4-argon' }, // SPECULATIVE: announced 2026-09-30, API-gated; Elo 1525 prelim (#1), $2/$10 intro. Prefix match also takes '-preview'
+    { vendor: 'googleai',   modelId: 'models/gemini-4-argon' }, // 2026-10-13 API GA; Elo 1525 prelim (#1), $2/$10 intro through 2026-11-30, then $4/$20
     { vendor: 'openrouter', modelId: 'google/gemini-4-argon' },
     { vendor: 'googleai',   modelId: 'models/gemini-3.8-flash' }, // 2026-09-02 GA - newest Flash flagship, same intro price as 3.6 (3.7 Flash, deprecated 2026-10-08, routes here)
     { vendor: 'googleai',   modelId: 'models/gemini-3.6-flash' }, // 2026-07-21 GA - cheaper output (3.5 Flash, deprecated 2026-10-08, routes here)
@@ -106,6 +108,7 @@ export const EditorialDefaults = {
     { vendor: 'xai',        modelId: 'grok-4.6' }, // 2026-08-12 GA - frontier for coding/agentic/knowledge work, extends 4.5
     { vendor: 'xai',        modelId: 'grok-4.5' },
     { vendor: 'xai',        modelId: 'grok-4.3' },
+    { vendor: 'moonshot',   modelId: 'kimi-k3.1-pro' }, // 2026-10-23 GA, $2/$10, cheaper than K3
     { vendor: 'moonshot',   modelId: 'kimi-k3' },
     { vendor: 'moonshot',   modelId: 'kimi-k2.6' },
     { vendor: 'zai',        modelId: 'glm-5.3' }, // 2026-08-27: standard API GA (was Coding-Plan-only at launch)
@@ -144,7 +147,7 @@ export const EditorialDefaults = {
     { vendor: 'moonshot',   modelId: 'kimi-k2.6' },
     { vendor: 'deepseek',   modelId: 'deepseek-flash' },
     // NVIDIA NIM: free trial catalog, tail picks (z-ai/glm-5.2 dropped: NVIDIA EOL 2026-08-24)
-    { vendor: 'nvidianim',  modelId: 'nvidia/nemotron-3-super-120b-a12b' }, // agentic/tool-use tuned, 12B active
+    { vendor: 'nvidianim',  modelId: 'nvidia/nemotron-3.5-super-vl-120b-a12b' }, // agentic/tool-use tuned, 12B active (3 Super 404s for our key since 2026-10-21)
     { vendor: 'nvidianim',  modelId: 'deepseek-ai/deepseek-v4.1-flash' },
   ],
 
@@ -176,9 +179,8 @@ export const EditorialDefaults = {
     { vendor: 'zai',        modelId: 'glm-5.3-flash' }, // 2026-08-27: 18B active, $0.15/$0.5 - the actual Z.ai fast tier (5.2 was a pre-flash placeholder)
     { vendor: 'zai',        modelId: 'glm-5.2' },
     { vendor: 'deepseek',   modelId: 'deepseek-flash' },
-    // NVIDIA NIM: free trial catalog, tail picks (nemotron-3-nano-30b-a3b and nemotron-nano-9b-v2 dropped: NVIDIA EOL 2026-08-25)
+    // NVIDIA NIM: free trial catalog, tail pick (gpt-oss-20b dropped: invokes time out since 2026-10-21)
     { vendor: 'nvidianim',  modelId: 'nvidia/nemotron-3.5-lightning-30b-a3b' }, // fastest Nemotron MoE, 3B active, 1M ctx
-    { vendor: 'nvidianim',  modelId: 'openai/gpt-oss-20b' },
   ],
 
   imageCaption: [
@@ -205,6 +207,8 @@ export const EditorialDefaults = {
     { vendor: 'nvidianim',  modelId: 'meta/muse-glimmer-30b' }, // replaces mistral-medium-3.5-128b (410 Gone on NVIDIA since 2026-08-17)
   ],
 
+  scratchChat: [],
+
 } as const satisfies _EditorialDefaultsTable;
 
 
@@ -213,24 +217,37 @@ export const EditorialDefaults = {
 /**
  * Pick the editor's favorite for a domain, given pre-filtered candidates.
  *
- * Walks `EditorialDefaults[domainId]` in declared order and returns the first DLLMId
- * matching a (vendor, modelId) pair. Returns undefined when nothing matches; the
- * caller (auto-resolver) falls through to the ELO/cost strategy.
+ * Walks `EditorialDefaults[domainId]` for each of `domainIds` in order, each in declared
+ * order, and returns the first DLLMId matching a (vendor, modelId) pair. Returns undefined
+ * when nothing matches; the caller (auto-resolver) falls through to the ELO/cost strategy.
  */
-export function llmsEditorialPickForDomain(
-  domainId: DModelDomainId,
-  filteredLlms: ReadonlyArray<DLLM>,
-  fallbackEditorialDomainId?: DModelDomainId, // optional secondary domain to check when the primary domain has no picks or no matches
+export function llmsEditorial_ModelIdForDomain_SLOW<Tllm extends Pick<DLLM, 'id' | 'vId' | 'initialParameters'>>(
+  domainIds: ReadonlyArray<DModelDomainId>,
+  universe: ReadonlyArray<Tllm>,
 ): DLLMId | undefined {
-  const entries = EditorialDefaults[domainId]?.length ? EditorialDefaults[domainId]
-    : fallbackEditorialDomainId && EditorialDefaults[fallbackEditorialDomainId]?.length ? EditorialDefaults[fallbackEditorialDomainId]
-      : undefined;
-  if (!entries) return undefined;
-  for (const { vendor, modelId } of entries) {
-    // exact first: the prefix rule would otherwise take OpenRouter's 'openai/gpt-6-luna-pro' (listed first) for 'openai/gpt-6-luna'
-    const hit = filteredLlms.find(llm => llm.vId === vendor && llm.initialParameters?.llmRef === modelId)
-      ?? filteredLlms.find(llm => llm.vId === vendor && _editorialMatch(llm, modelId));
-    if (hit) return hit.id;
+  for (const domainId of domainIds) {
+    for (const { vendor, modelId } of EditorialDefaults[domainId] ?? []) {
+
+      // exact first: match by (vendor, id)
+      let relaxedLlm: Tllm | undefined;
+      const exactLlm = universe.find((llm) => {
+        if (llm.vId !== vendor) return false;
+
+        const llmRef = llm.initialParameters?.llmRef;
+        if (!llmRef || typeof llmRef !== 'string') return false;
+
+        // exact match
+        if (llmRef === modelId) return true;
+
+        // relaxed after: the prefix rule would otherwise take OpenRouter's 'openai/gpt-6-luna-pro' (listed first) for 'openai/gpt-6-luna';
+        // first relaxed hit wins: dated-suffix prefix, or dot/dash-equivalent (OpenRouter's 'claude-opus-4.8' vs our 'claude-opus-4-8')
+        if (!relaxedLlm && (llmRef.startsWith(modelId) || textEqualsDotDashInsensitive(llmRef, modelId)))
+          relaxedLlm = llm;
+        return false; // keep looking for an exact match
+      });
+      if (exactLlm) return exactLlm.id;
+      if (relaxedLlm) return relaxedLlm.id;
+    }
   }
   return undefined;
 }
@@ -268,13 +285,4 @@ function _isGeminiFamily(llm: DLLM): boolean {
   if (llm.vId === 'googleai') return true;
   const llmRef = llm.initialParameters?.llmRef;
   return typeof llmRef === 'string' && llmRef.toLowerCase().includes('gemini');
-}
-
-
-/** Tolerant id match: exact `llmRef`, dated-suffix prefix on `llmRef`, or dot/dash-equivalent (OpenRouter's 'claude-opus-4.8' vs our 'claude-opus-4-8'). */
-function _editorialMatch(llm: DLLM, editorialId: string): boolean {
-  const llmRef = llm.initialParameters?.llmRef;
-  return typeof llmRef === 'string' && (llmRef === editorialId || llmRef.startsWith(editorialId) || llmRef.replace(/\./g, '-') === editorialId.replace(/\./g, '-'));
-  // this would match the mdoel in alternative services I guess - but also notice we use the llmRef correctly, not the DLLMId
-  // return llm.id === editorialId || llm.id.endsWith(`-${editorialId}`);
 }
