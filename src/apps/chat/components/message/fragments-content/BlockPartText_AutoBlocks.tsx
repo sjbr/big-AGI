@@ -6,10 +6,7 @@ import { AutoBlocksHtmlRenderVariant, AutoBlocksRenderer } from '~/modules/block
 import type { ContentScaling } from '~/common/app.theme';
 import type { DMessageFragmentId } from '~/common/stores/chat/chat.fragments';
 import type { DMessageRole } from '~/common/stores/chat/chat.message';
-import { GoodTooltip } from '~/common/components/GoodTooltip';
-import { InlineError } from '~/common/components/InlineError';
 
-import { explainServiceErrors } from '../explainServiceErrors';
 
 
 /** Settled fragments skip streaming updates elsewhere in the message. */
@@ -39,13 +36,13 @@ function BlockPartText_AutoBlocks(props: {
 
   inFlux: boolean,
 
+  onReattachAsFile?: (file: File) => void;
   onDoubleClick?: (event: React.MouseEvent) => void;
 
 }) {
 
   // derived state
   const messageText = props.textPartText;
-  const fromAssistant = props.messageRole === 'assistant';
 
 
   // handlers
@@ -56,20 +53,6 @@ function BlockPartText_AutoBlocks(props: {
     setEditedText?.(fragmentId, newText, true);
   }, [fragmentId, setEditedText]);
 
-
-  const errorExplainer = React.useMemo(
-    () => !messageText ? null : explainServiceErrors(messageText, fromAssistant),
-    [fromAssistant, messageText],
-  );
-
-  // if errored, render an Auto-Error message
-  if (errorExplainer) {
-    return (
-      <GoodTooltip placement='top' arrow title={messageText}>
-        <div><InlineError error={<>{errorExplainer} Hover this message for more details.</>} /></div>
-      </GoodTooltip>
-    );
-  }
 
   return (
     <AutoBlocksRenderer
@@ -87,6 +70,7 @@ function BlockPartText_AutoBlocks(props: {
       inFlux={props.inFlux}
       onDoubleClick={props.onDoubleClick}
       setText={!props.setEditedText ? undefined : handleSetText}
+      onReattachAsFile={props.onReattachAsFile}
     />
   );
 }

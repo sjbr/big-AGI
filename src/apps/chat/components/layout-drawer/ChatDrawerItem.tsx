@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { Avatar, Box, IconButton, ListItem, ListItemButton, ListItemDecorator, Sheet, styled, Tooltip, Typography } from '@mui/joy';
+import ArchiveOutlinedIcon from '@mui/icons-material/ArchiveOutlined';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import CopyAllIcon from '@mui/icons-material/CopyAll';
@@ -31,6 +32,21 @@ import { CHAT_NOVEL_TITLE } from '../../AppChat';
 
 // set to true to display the conversation IDs
 // const DEBUG_CONVERSATION_IDS = false;
+
+
+// title text: mobile (< md) stays on one ellipsized line; desktop wraps, up to 3 tight lines
+const _titleTextSx = {
+  flexGrow: 1,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: { xs: 'nowrap', md: 'normal' },
+  overflowWrap: 'anywhere',
+  display: { md: '-webkit-box' },
+  WebkitLineClamp: 3,
+  lineHeight: 'xs',
+  my: 0.5, // air for wrapped titles (margin, not padding: padding would reveal the clamped line)
+  WebkitBoxOrient: 'vertical',
+} as const;
 
 
 export const FadeInButton = styled(IconButton)({
@@ -154,6 +170,14 @@ function ChatDrawerItem(props: {
   }, [conversationId, folder, onConversationFolderChange]);
 
 
+  // Archive
+
+  const handleConversationArchive = React.useCallback((event: React.MouseEvent) => {
+    event.stopPropagation();
+    useChatStore.getState().setArchived(conversationId, true);
+  }, [conversationId]);
+
+
   // Title Edit
 
   const handleTitleEditBegin = React.useCallback(() => setIsEditingTitle(true), []);
@@ -252,9 +276,8 @@ function ChatDrawerItem(props: {
       <Box
         onDoubleClick={handleTitleEditBegin}
         sx={{
+          ..._titleTextSx,
           color: isActive ? 'text.primary' : 'text.secondary',
-          overflowWrap: 'anywhere',
-          flex: 1,
         }}
       >
         {/*{DEBUG_CONVERSATION_IDS && `${conversationId} - `}*/}
@@ -263,6 +286,7 @@ function ChatDrawerItem(props: {
     ) : (
       <InlineTextarea
         invertedColors
+        maxRows={3} // long titles scroll within ~3 rows instead of making the row very tall
         initialText={title}
         onEdit={handleTitleEditChange}
         onCancel={handleTitleEditCancel}
@@ -295,8 +319,8 @@ function ChatDrawerItem(props: {
     progress > 0 && (
       <Box sx={{
         backgroundColor: 'neutral.softHoverBg',
-        position: 'absolute', left: 0, bottom: 0, width: progress + '%', height: 4,
-      }} />
+        position: 'absolute', left: 0, bottom: 0, height: 4,
+      }} style={{ width: progress + '%' /* per search keystroke: style, not sx */ }} />
     ), [progress]);
 
   return (isActive || isAlsoOpen) ? (
@@ -355,13 +379,13 @@ function ChatDrawerItem(props: {
       <ListItem sx={{ border: 'none', display: 'grid', gap: 0, px: 'calc(var(--ListItem-paddingX) - 0.25rem)' }}>
 
         {/* Title row */}
-        <Box sx={{ display: 'flex', gap: 'var(--ListItem-gap)', minHeight: '2.25rem', alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', gap: 'var(--ListItem-gap)', minWidth: 0, minHeight: '2.25rem', alignItems: 'center' }}>
           {titleRowComponent}
         </Box>
 
         {/* buttons row */}
         {isActive && (
-          <Box sx={{ display: 'flex', gap: 0.5, minHeight: '2.25rem', alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, minHeight: '2.25rem', alignItems: 'center' }}>
             {props.showSymbols && <ListItemDecorator />}
 
             {/* Current Folder color, and change initiator */}
@@ -406,6 +430,14 @@ function ChatDrawerItem(props: {
                     <FileUploadOutlinedIcon />
                   </FadeInButton>
                 </Tooltip>
+
+                {!props.item.isArchived && (
+                  <Tooltip arrow disableInteractive title='Archive'>
+                    <FadeInButton size='sm' aria-label='Archive' onClick={handleConversationArchive}>
+                      <ArchiveOutlinedIcon />
+                    </FadeInButton>
+                  </Tooltip>
+                )}
               </>}
 
             </>}
